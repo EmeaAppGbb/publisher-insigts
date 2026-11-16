@@ -1,0 +1,50 @@
+version: 2
+
+# Terraform providers and the dev container's Copilot and plugin pins are updated
+# deliberately, not here; see AGENTS.md and the template-maintenance skill.
+updates:
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # Keep Node's type definitions on the runtime's release line (Node 24 in app/Dockerfile).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      # The trace exporter and the OpenTelemetry SDK must share one OpenTelemetry release line.
+      opentelemetry:
+        patterns:
+          - "@azure/monitor-opentelemetry-exporter"
+          - "@opentelemetry/*"
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directories:
+      - /app
+    schedule:
+      interval: weekly
+    ignore:
+      # The runtime line changes deliberately: Node stays on its 24 LTS line.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: distroless/nodejs24-debian13
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: devcontainers
+    directory: /
+    schedule:
+      interval: weekly

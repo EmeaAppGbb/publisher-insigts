@@ -1,0 +1,54 @@
+{
+  "name": "Fabric and Foundry development",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/azure-cli:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "gatewayPorts": "no"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "1.16.5",
+      "tflint": "none",
+      "terragrunt": "none"
+    },
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "24",
+      "nodeGypDependencies": false,
+      "pnpmVersion": "none"
+    },
+    "./features/iq-plugins": {}
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "bash .devcontainer/check-tools.sh",
+  "forwardPorts": [
+    3000,
+    8080
+  ],
+  "portsAttributes": {
+    "3000": {
+      "label": "Scenario assistant (npm run dev)",
+      "onAutoForward": "notify"
+    },
+    "8080": {
+      "label": "Scenario assistant app image (docker run)",
+      "onAutoForward": "silent"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "ms-python.python",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

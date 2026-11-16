@@ -1,0 +1,293 @@
+locals {
+  # Serverless (preview) fails provisioning when a managed identity is requested, and its resource
+  # provider answers HTTP 500 to identity writes and to every change once an identity exists.
+  # Terraform creates it without one, deploy.py enables the system identity after the platform
+  # apply, and a changed setting replaces the service instead of updating it in place.
+  search_identity_deferred = var.search_sku == "serverless"
+  # Grant the identity once it exists: at creation on dedicated tiers, at knowledge setup on serverless,
+  # and never in the apply that creates or replaces a serverless service (deploy.py stages that plan).
+  search_identity_granted = var.search_identity_ready && (!local.search_identity_deferred || var.knowledge_lakehouse_id != null)
+  search_identity_missing = "The Search service has no system-assigned identity yet. deploy.py up enables it and stages plans that create or replace serverless Search. By hand: apply such a plan with -var search_identity_ready=false, PATCH {\"identity\":{\"type\":\"SystemAssigned\"}} to the search_management_url output (the preview answers HTTP 500), confirm identity.principalId with a GET, then plan again."
+  search_settings = {
+    semanticSearch = "standard"
+    # Agentic retrieval has its own billing plan since the 2026-04-01 Search API.
+    knowledgeRetrieval = "standard"
+    # The project identity authenticates to Search; ontology queries also need a user token.
+    # Local authentication stays on for the admin key that manages knowledge objects.
+    disableLocalAuth = false
+    authOptions      = { aadOrApiKey = { aadAuthFailureMode = "http401WithBearerChallenge" } }
+  }
+  search_endpoint     = azapi_resource.search.output.endpoint
+  search_principal_id = azapi_resource.search.output.principal_id
+}
+
+resource "azapi_resource" "search" {
+  type      = "Microsoft.Search/searchServices@${local.search_management_api_version}"
+  name      = "srch-${local.resource_prefix}"
+  parent_id = azurerm_resource_group.main.id
+  location  = coalesce(var.search_location, var.location)
+  tags      = local.tags
+
+  dynamic "identity" {
+    for_each = local.search_identity_deferred ? [] : ["SystemAssigned"]
+    content {
+      type = identity.value
+    }
+  }
+
+  body = {
+    sku        = { name = var.search_sku }
+    properties = local.search_settings
+  }
+
+  # Serverless cannot switch tiers or, during its preview, change any setting in place.
+  replace_triggers_external_values = {
+    sku      = var.search_sku
+    settings = local.search_identity_deferred ? jsonencode([local.search_settings, local.tags]) : null
+  }
+
+  response_export_values = {
+    endpoint     = "properties.endpoint"
+    principal_id = "identity.principalId"
+  }
+
+  lifecycle {
+    # deploy.py owns enabling the serverless identity; never plan its removal.
+    ignore_changes = [identity]
+  }
+}
+
+data "fabric_lakehouse" "knowledge" {
+  count = var.knowledge_lakehouse_id == null ? 0 : 1
+
+  id           = var.knowledge_lakehouse_id
+  workspace_id = fabric_workspace.dev.id
+}
+
+data "fabric_ontology" "knowledge" {
+  for_each = var.knowledge_ontologies
+
+  id           = each.value.ontology_id
+  workspace_id = fabric_workspace.dev.id
+}
+
+# The OneLake indexer currently requires workspace Contributor, not Viewer.
+resource "fabric_workspace_role_assignment" "search_onelake_contributor" {
+  count = local.search_identity_granted ? 1 : 0
+
+  workspace_id = fabric_workspace.dev.id
+  role         = "Contributor"
+  principal = {
+    id   = local.search_principal_id
+    type = "ServicePrincipal"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.search_principal_id != null
+      error_message = local.search_identity_missing
+    }
+  }
+}
+
+resource "azurerm_role_assignment" "search_foundry_user" {
+  count = local.search_identity_granted ? 1 : 0
+
+  scope                            = azapi_resource.foundry.id
+  role_definition_name             = "Cognitive Services User"
+  principal_id                     = local.search_principal_id
+  skip_service_principal_aad_check = true
+
+  lifecycle {
+    precondition {
+      condition     = local.search_principal_id != null
+      error_message = local.search_identity_missing
+    }
+  }
+}
+
+resource "azurerm_role_assignment" "project_search_reader" {
+  scope                            = azapi_resource.search.id
+  role_definition_name             = "Search Index Data Reader"
+  principal_id                     = azapi_resource.foundry_project.identity[0].principal_id
+  skip_service_principal_aad_check = true
+}
+
+resource "azurerm_role_assignment" "deployer_search_reader" {
+  scope                = azapi_resource.search.id
+  role_definition_name = "Search Index Data Reader"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# The Foundry portal edits knowledge bases with the signed-in user's Entra token, so a live attach needs this role.
+resource "azurerm_role_assignment" "knowledge_editor_search_contributor" {
+  for_each = toset([for id in var.knowledge_editor_principal_ids : lower(id)])
+
+  scope                = azapi_resource.search.id
+  role_definition_name = "Search Service Contributor"
+  principal_id         = each.value
+}
+
+# One source per knowledge_folders entry: files outside those folders, such as archived or draft versions, never
+# reach the index.
+resource "restful_resource" "knowledge_source" {
+  for_each = var.knowledge_lakehouse_id == null ? {} : var.knowledge_folders
+
+  path            = "/knowledgesources/${local.knowledge_source_names[each.key]}"
+  check_existance = true
+  # Rebuild the generated ingestion objects when source settings change.
+  force_new_attrs = ["name", "kind", "description", "indexedOneLakeParameters"]
+
+  body = {
+    name        = local.knowledge_source_names[each.key]
+    kind        = "indexedOneLake"
+    description = each.value.description
+    indexedOneLakeParameters = {
+      fabricWorkspaceId = fabric_workspace.dev.id
+      lakehouseId       = data.fabric_lakehouse.knowledge[0].id
+      targetPath        = each.value.target_path
+      ingestionParameters = {
+        networkAccessMode         = "public"
+        contentExtractionMode     = "minimal"
+        disableImageVerbalization = true
+        ingestionSchedule         = { interval = "PT5M" }
+        embeddingModel = {
+          kind = "azureOpenAI"
+          azureOpenAIParameters = {
+            resourceUri  = local.openai_endpoint
+            deploymentId = azapi_resource.embedding_model.name
+            modelName    = var.embedding_model.name
+          }
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    # Search redacts this ID on GET; changes are tracked by the workspace trigger.
+    ignore_changes = [body.indexedOneLakeParameters.fabricWorkspaceId]
+    # Any planned Search change rebuilds the source; serverless changes are always replacements.
+    replace_triggered_by = [
+      azapi_resource.search,
+      fabric_workspace.dev.id,
+      azapi_resource.embedding_model.body,
+    ]
+  }
+
+  depends_on = [
+    fabric_workspace_role_assignment.search_onelake_contributor,
+    azurerm_role_assignment.search_foundry_user,
+  ]
+}
+
+resource "restful_resource" "knowledge_base" {
+  count = var.knowledge_lakehouse_id == null ? 0 : 1
+
+  path            = "/knowledgebases/${local.knowledge_base_name}"
+  check_existance = true
+
+  # Minimal effort with extractive output: Search runs the agent's question against every attached source and returns
+  # the passages, each with its file's doc_url, in about a second, where medium effort with answer synthesis took about
+  # five. The agent writes the answer from the passages, and asks a second question when a passage points to another
+  # document's section, which medium effort asked inside Search. Minimal takes intents, not messages, and runs no
+  # model: the model stays configured only so a request or the Foundry portal can still choose another effort.
+  body = {
+    name        = local.knowledge_base_name
+    description = "Approved documents for ${var.project_name}: the attached knowledge_folders sources from the DEV knowledge lakehouse."
+    outputMode  = "extractiveData"
+    # Only attached folders: a detached source stays indexed, ready to attach in the Foundry portal.
+    knowledgeSources = [
+      for key, source in restful_resource.knowledge_source : { name = source.body.name } if var.knowledge_folders[key].attach
+    ]
+    models = [{
+      kind = "azureOpenAI"
+      azureOpenAIParameters = {
+        resourceUri  = local.openai_endpoint
+        deploymentId = azapi_resource.chat_model.name
+        modelName    = var.chat_model.name
+      }
+    }]
+    retrievalReasoningEffort = { kind = "minimal" }
+  }
+
+  lifecycle {
+    # Search refuses to delete a source while a knowledge base references it, including a source attached in the
+    # portal, so rebuilding any source rebuilds the base first, and so does adding or removing a folder key.
+    replace_triggered_by = [restful_resource.knowledge_source, terraform_data.knowledge_base_sources[count.index]]
+  }
+}
+
+# replace_triggered_by fires when a referenced instance is updated or replaced, never when one is created or deleted.
+# These record each base's source keys, so removing a key rebuilds the base, and Terraform deletes the base before the
+# removed source, as Search requires. Without them the apply would delete a source the base still references and fail.
+# Each exists exactly when its base does: the plan that creates a base creates its tracker too, rather than replacing
+# one recorded while the base was absent, so the first knowledge setup plans no replacement.
+resource "terraform_data" "knowledge_base_sources" {
+  count = var.knowledge_lakehouse_id == null ? 0 : 1
+
+  triggers_replace = sort(keys(var.knowledge_folders))
+}
+
+resource "terraform_data" "ontology_check_base_sources" {
+  count = length(var.knowledge_ontologies) == 0 ? 0 : 1
+
+  triggers_replace = sort(keys(var.knowledge_ontologies))
+}
+
+resource "restful_resource" "ontology_source" {
+  for_each = var.knowledge_ontologies
+
+  path            = "/knowledgesources/${var.project_name}-${each.key}-ontology"
+  check_existance = true
+  force_new_attrs = ["name", "kind"]
+
+  body = {
+    name        = "${var.project_name}-${each.key}-ontology"
+    kind        = "fabricOntology"
+    description = each.value.description
+    fabricOntologyParameters = {
+      workspaceId = fabric_workspace.dev.id
+      ontologyId  = data.fabric_ontology.knowledge[each.key].id
+    }
+  }
+
+  lifecycle {
+    replace_triggered_by = [azapi_resource.search]
+  }
+}
+
+# deploy.py verify proves the live ontology route here with the deployer's own token. No agent uses this base, and the
+# agents' knowledge base never holds an ontology, so a variant without the Fabric IQ tool can't reach the ontology
+# through its documents.
+resource "restful_resource" "ontology_check_base" {
+  count = length(var.knowledge_ontologies) == 0 ? 0 : 1
+
+  path            = "/knowledgebases/${local.ontology_check_base_name}"
+  check_existance = true
+
+  body = {
+    name                  = local.ontology_check_base_name
+    description           = "Check-only knowledge base for ${var.project_name}: the live Fabric ontology sources, queried by deploy.py verify and never by an agent."
+    outputMode            = "answerSynthesis"
+    answerInstructions    = "Answer only from the live ontology results and cite them. If the ontology returns nothing or the query fails, say so. Never report unavailable or unauthorized sources as successfully queried."
+    retrievalInstructions = "Query the connected Fabric ontology sources for current entities, relationships and values. Never substitute other content for a failed ontology query."
+    knowledgeSources      = [for source in restful_resource.ontology_source : { name = source.body.name }]
+    models = [{
+      kind = "azureOpenAI"
+      azureOpenAIParameters = {
+        resourceUri  = local.openai_endpoint
+        deploymentId = azapi_resource.chat_model.name
+        modelName    = var.chat_model.name
+      }
+    }]
+    retrievalReasoningEffort = { kind = "low" }
+  }
+
+  lifecycle {
+    # Search refuses to delete a source while a knowledge base references it, so a changed or removed ontology key
+    # rebuilds this base first (see terraform_data.ontology_check_base_sources).
+    replace_triggered_by = [restful_resource.ontology_source, terraform_data.ontology_check_base_sources[count.index]]
+  }
+
+  depends_on = [azurerm_role_assignment.search_foundry_user]
+}
