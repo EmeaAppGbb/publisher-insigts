@@ -74,7 +74,7 @@ at start, and an invalid or incomplete configuration stops the container.
 | --- | --- | --- |
 | Browser -> app server | `GET /api/config` returns `{ tenantId, clientId, scopes }`. `POST /api/turns` with `{ cid, variant, question, previousResponseId? }` answers with newline-delimited JSON: a `tool` event as each call starts and ends, a `heartbeat` every 15 seconds and one `result` | The user's token for `https://ai.azure.com/user_impersonation`, as `Authorization: Bearer` |
 | App server -> Foundry | `POST <project endpoint>/openai/v1/responses` with `agent_reference` to the variant's agent, the question as `input`, `previous_response_id` for a follow-up, the metadata `cid` and `variant`, and `stream: true` | The same token, forwarded |
-| With IQ -> Fabric IQ | MCP `ask_ontology` on `ScenarioOntology`'s endpoint, connection `fabric-scenario` | `UserEntraToken`: the user's token, exchanged for Fabric |
+| With IQ -> Fabric IQ | MCP `ask_ontology` on `BooksOntology`'s endpoint, connection `fabric-scenario` | `UserEntraToken`: the user's token, exchanged for Fabric |
 | With IQ -> Foundry IQ | MCP `knowledge_base_retrieve` on `<project_name>-knowledge`, connection `knowledge-base` | `ProjectManagedIdentity`, with Search Index Data Reader |
 | With IQ -> Web IQ public context | MCP `knowledge_base_retrieve` on `<project_name>-public-context`, connection `public-context` | `ProjectManagedIdentity`; Search calls Web IQ with its stored key |
 | With IQ -> Work IQ mail, only with Work IQ | MCP `fetch` on `https://workiq.svc.cloud.microsoft/mcp`, connection `work-iq` | `OAuth2` identity passthrough: the Work IQ token Foundry keeps for each user after their consent |
@@ -182,7 +182,7 @@ python3 .github/skills/deploy-platform/scripts/foundry_agent.py render \
 
 | Tool file | Server label | Allowed tool | Target | Connection |
 | --- | --- | --- | --- | --- |
-| `FabricIQOntology.json` | `fabric_iq_ontology` | `ask_ontology` | `ScenarioOntology` | `fabric-scenario`, as the user |
+| `FabricIQOntology.json` | `fabric_iq_ontology` | `ask_ontology` | `BooksOntology` | `fabric-scenario`, as the user |
 | `FoundryIQKnowledge.json` | `foundry_iq_knowledge` | `knowledge_base_retrieve` | `<project_name>-knowledge` | `knowledge-base`, as the project |
 | `WebIQPublicContext.json` | `web_iq_public_context` | `knowledge_base_retrieve` | `<project_name>-public-context` | `public-context`, as the project |
 | `WorkIQMail.json` | `work_iq_mail` | `fetch` | Work IQ's MCP server: the user's own mail | `work-iq`, as the user; only with `work_iq_enabled` |
@@ -406,11 +406,11 @@ tool consent.
 
 | Gate | Required evidence | Checked by |
 | --- | --- | --- |
-| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`Pump B`, `North Works`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge`; an authenticated Web IQ search and a cited public-context retrieval; with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
+| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`The Glass Orchard`, `Forecast variance`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge`; an authenticated Web IQ search and a cited public-context retrieval; with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
 | Agents | Each agent's latest version carries the reviewed definition's digest | `agent` phase |
 | App | `/healthz` answers 200, and `/api/config` serves this deployment's client ID | `app` phase |
 | Browser sign-in | A person signs in at the app URL, asks with IQ and without, and continues with a follow-up | You |
-| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (Pump B at North Works), a cited starter-document passage, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
+| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (The Glass Orchard's forecast variance), a cited starter-document passage, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
 | Replies | Each answer carries a marker after each fact, then *Sources* and *Steps*, and shows the run's response ID | You |
 | Authorization | Missing consent, an expired sign-in, a missing Foundry role (HTTP 403) or denied Fabric access is an explicit failure, never an answer from another source | You, with a second account |
 | Isolation | A second user can't continue or read the first user's conversation through its response ID, or reach their mail | You, with a second account |
@@ -517,7 +517,7 @@ token checks or recreate an agent to hide a failure.
 | --- | --- | --- |
 | Bootstrap stops with `CapacityNotActive`; in the app, every with-IQ turn fails within seconds with "A user error occurred while executing a tool call" (`tool_user_error`) while the without-IQ agent answers | The Fabric capacity is paused | Resume the capacity in the Azure portal, then ask again. Pause it again when idle. |
 | Retrieval fails with HTTP 500 "exceeded the maximum runtime" right after a resume | A cold start | Retry; warm up with one question before you rely on the app. |
-| Graph materialization reports *Unsupported Data Source* for every entity | The ontology is bound through a OneLake (`AzureStorage.DataLake`) expression, which loses the `ONT_*` pins | Rerun `BindScenario` (`deploy.py up` reruns it while the binding is unverified): the binding must use the [SQL endpoint form](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint). |
+| Graph materialization reports *Unsupported Data Source* for every entity | The ontology is bound through a OneLake (`AzureStorage.DataLake`) expression, which loses the `ONT_*` pins | Rerun `BindBooks` (`deploy.py up` reruns it while the binding is unverified): the binding must use the [SQL endpoint form](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint). |
 | Web IQ search or public-context retrieval fails with HTTP 401 or 403 | The key is wrong or rotated, or lacks Web Search | Create a new key in the portal, export it as `WEB_IQ_API_KEY`, increment `web_iq_api_key_version` and rerun `up`. |
 | Web IQ returns HTTP 429 | Web IQ quota | Wait, or raise the Web IQ quota; the runner never retries a billable search. |
 | Sign-in fails with `AADSTS50011` | The page's address isn't a registered redirect URI, such as `localhost` without `app_local_redirect_uris`, a Codespaces URL or a custom domain | Use the `app` output's `url`, or register `http://localhost:3000/redirect.html` through `app_local_redirect_uris`. |

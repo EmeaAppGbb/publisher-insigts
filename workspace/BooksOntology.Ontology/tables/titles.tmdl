@@ -1,0 +1,26 @@
+table titles
+	lineageTag: ff783818-61d5-405b-b631-2b97b770615f
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column title_name
+		dataType: string
+		sourceColumn: title_name
+
+	column author_name
+		dataType: string
+		sourceColumn: author_name
+
+	column genre
+		dataType: string
+		sourceColumn: genre
+
+	column imprint
+		dataType: string
+		sourceColumn: imprint
+
+	column publication_date
+		dataType: dateTime
+		sourceColumn: publication_date

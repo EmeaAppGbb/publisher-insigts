@@ -42,8 +42,9 @@ the repository root.
 
 ## Fabric ontology work package
 
-A different domain gets new item identities, not a rewritten Site/Asset model
-under its old logical ID. Publish all of the following together:
+A different domain gets new item identities, not a rewritten model under an
+earlier domain's logical ID; the books domain replaced the template's Site/Asset
+sample this way. Publish all of the following together:
 
 ```text
 workspace/
@@ -70,8 +71,8 @@ workspace/
     plan.yml
 ```
 
-The [included ontology](../workspace/ScenarioOntology.Ontology) is the exact
-native TMDL example. `database.tmdl` declares compatibility; `model.tmdl`
+The [included ontology](../workspace/BooksOntology.Ontology) is the exact
+native TMDL example, and [the data contract](../scenario/data/README.md) its tables and rules. `database.tmdl` declares compatibility; `model.tmdl`
 references tables, entities and namespace. Each entity declares its backing
 table, key and typed property/column mappings. `relationships.tmdl` declares
 source-table joins and cardinalities; `entityRelationships.tmdl` maps those
@@ -108,10 +109,11 @@ Deploy each executable notebook before its action. Attach the reviewed plan
 explicitly; if the preview option is unavailable, stop for a user-approved
 native sync plus explicit notebook execution path. Never silently omit actions.
 
-The current [seeder](../workspace/SeedScenario.Notebook/notebook-content.py),
-[binder](../workspace/BindScenario.Notebook/notebook-content.py) and
+The current [seeder](../workspace/SeedBooks.Notebook/notebook-content.py),
+[signal notebook](../workspace/ComputeBookSignals.Notebook/notebook-content.py),
+[binder](../workspace/BindBooks.Notebook/notebook-content.py) and
 [plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) demonstrate the safety
-contract. Their Site/Asset-specific identity/mapping checks are not a generic
+contract. Their books-specific identity/mapping checks are not a generic
 rewriter for another domain.
 
 ## Knowledge and indexing work package

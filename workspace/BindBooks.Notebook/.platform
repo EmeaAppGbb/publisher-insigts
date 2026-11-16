@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "BindBooks",
+    "description": "Refresh the Books tables' SQL metadata and bind BooksOntology to the current workspace's Books lakehouse."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "b46187c3-8831-49fe-b138-a1edb0f64897"
+  }
+}

@@ -1,6 +1,6 @@
 # Seeded ontologies in Foundry IQ
 
-The template includes a Git-owned **Site/Asset ontology**, seeded lakehouse data, a starter document and a deployment-plan action that binds them in the target workspace. Terraform registers the lakehouse's document folders as indexed knowledge sources of the agents' knowledge base, and this and additional DEV ontologies as live sources of a separate, **check-only** knowledge base.
+The repository includes a Git-owned **book portfolio ontology**, seeded lakehouse data, a notebook that derives the latest week's signals, a starter document and a deployment-plan action that binds them in the target workspace. Terraform registers the lakehouse's document folders as indexed knowledge sources of the agents' knowledge base, and this and additional DEV ontologies as live sources of a separate, **check-only** knowledge base.
 
 This uses the native [`fabricOntology` knowledge source (preview)](https://learn.microsoft.com/azure/search/agentic-knowledge-source-how-to-fabric-ontology), not document export or a custom MCP proxy. The source queries Fabric at retrieval time; it doesn't create an index, copy table rows to Search, or use the folder sources' five-minute schedule.
 
@@ -25,22 +25,23 @@ Registering the Search source doesn't remove its end-user token requirement.
 
 | Ontology definition | Backing data |
 | --- | --- |
-| `Site`: SiteId, SiteName, Region | `Scenario.dbo.demo_sites` |
-| `Asset`: AssetId, AssetSiteId, AssetName, Status | `Scenario.dbo.demo_assets` |
-| `LocatedAt`: Asset -> Site | `demo_assets.site_id -> demo_sites.site_id` |
+| `Title`, `Edition` (`EditionOf` -> Title), `Campaign` (`Promotes` -> Title) | `Books.dbo.titles`, `editions` and `campaigns`, seeded by `SeedBooks` |
+| `TitleSignal` (`SignalFor` -> Title), `DecisionOption` (`OptionFor` -> TitleSignal), `TitlePerformance` (`PerformanceOf` -> Title) | `Books.dbo.title_signals`, `decision_options` and `title_performance`, derived by `ComputeBookSignals` |
+| `ReprintRequest` (`ReprintOf` -> Edition) | `Books.dbo.reprint_requests`, empty until a reprint request is approved |
 
-[`ScenarioOntology.Ontology`](../workspace/ScenarioOntology.Ontology) uses the [new-experience TMDL definition](https://learn.microsoft.com/rest/api/fabric/articles/item-management/definitions/ontology-definition), with stable logical and lineage IDs. The initial backing tables deliberately have **no partitions**: they define the shape without embedding someone else's workspace/SQL endpoint. The ontology is not data-query-ready until binding completes.
+The [data contract](../scenario/data/README.md) defines every table, key and rule. [`BooksOntology.Ontology`](../workspace/BooksOntology.Ontology) uses the [new-experience TMDL definition](https://learn.microsoft.com/rest/api/fabric/articles/item-management/definitions/ontology-definition), with stable logical and lineage IDs. The initial backing tables deliberately have **no partitions**: they define the shape without embedding someone else's workspace/SQL endpoint. The ontology is not data-query-ready until binding completes.
 
 The [`Bootstrap` plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) runs this sequence:
 
-1. Deploy `Scenario`, then deploy and execute `SeedScenario` to insert missing synthetic rows and `Files/documents/starter.txt`, the document the default `documents` folder source indexes. It leaves a legacy `Files/starter.txt` untouched.
-2. Deploy `ScenarioOntology` with its entities, properties and relationship.
-3. Deploy and execute `BindScenario`. It resolves both items in the **current workspace**, waits for the lakehouse's SQL analytics endpoint, refreshes SQL metadata for only `dbo.demo_sites` and `dbo.demo_assets`, and checks both per-table results.
-4. The binder adds the sample's Direct Lake partitions and the `ScenarioLakehouse` expression, which reads the lakehouse's SQL analytics endpoint, and pins every partition's `ONT_*` annotations. It then reads the definition back, checks its partitions, expression and pins, and prints the lakehouse/ontology GUIDs.
+1. Deploy `Books`, then deploy and execute `SeedBooks` to insert missing fictional rows and `Files/documents/starter.txt`, the document the default `documents` folder source indexes.
+2. Deploy and execute `ComputeBookSignals`, which replaces the three derived tables with the latest week's signals, decision options and title performance.
+3. Deploy `BooksOntology` with its entities, properties and relationships.
+4. Deploy and execute `BindBooks`. It resolves both items in the **current workspace**, waits for the lakehouse's SQL analytics endpoint, refreshes SQL metadata for only the seven ontology tables, and checks every per-table result.
+5. The binder adds one Direct Lake partition per table and the `BooksLakehouse` expression, which reads the lakehouse's SQL analytics endpoint, and pins every partition's `ONT_*` annotations. It then reads the definition back, checks its partitions, expression and pins, and prints the lakehouse/ontology GUIDs.
 
 ### Bind through the SQL analytics endpoint
 
-The `ScenarioLakehouse` expression reads the lakehouse's SQL analytics endpoint:
+The `BooksLakehouse` expression reads the lakehouse's SQL analytics endpoint:
 `Sql.Database("<endpoint host>", "<endpoint GUID>")` in an M `let ... in ...` block.
 Every partition carries eight `ONT_*` pins for that lakehouse:
 
@@ -66,17 +67,17 @@ expression, in either form, that reads this DEV lakehouse.
 
 Fabric Git normalizes `ONT_WorkspaceId` to a zero GUID, `ONT_ItemId` to the lakehouse's logical ID, and `ONT_WorkspaceName` to a placeholder. These are Git representations, not runtime source values. Rebind each target and inspect its live definition and data-backed query; do not treat the exported placeholders or an unchanged expression as proof of target readiness.
 
-[`BindScenario`](../workspace/BindScenario.Notebook/notebook-content.py) has a 15-minute default deadline, honors throttling/polling delays and surfaces failures. It uses the Fabric runtime's `notebookutils` credential; no token is in Git or Terraform. Its identity needs workspace Contributor or higher and the API permissions to list/read items, refresh SQL metadata, and read/write ontology definitions.
+[`BindBooks`](../workspace/BindBooks.Notebook/notebook-content.py) has a 15-minute default deadline, honors throttling/polling delays and surfaces failures. It uses the Fabric runtime's `notebookutils` credential; no token is in Git or Terraform. Its identity needs workspace Contributor or higher and the API permissions to list/read items, refresh SQL metadata, and read/write ontology definitions.
 
 **Run the bundled binding action as an authorized Fabric user.** [NotebookUtils `pbi` tokens have restricted scopes under service principals](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#considerations), omitting the full Fabric scopes needed here. Unattended service-principal execution needs an explicitly designed authentication flow in the derived project; the notebook does not switch identities or fall back to stored credentials on a permission failure.
 
-The binder is intentionally **sample-specific**, not a generic TMDL rewriter. It checks the logical ID and generation in ontology item metadata, the `BootstrapBinding` annotations on both entities, and the source expression's lineage tag. It preserves unrelated definition parts and business rules, and refuses custom partitions or source expressions rather than guessing how to overwrite them. Use the default definition endpoint and verify its TMDL parts: an explicit `format=TMDL` can be rejected, exported `.platform` can contain a placeholder logical ID, and model-level annotations can be omitted. Entity-level annotations survive the round trip. A correctly bound rerun does not update the ontology again. It neither seeds data nor materializes graphs.
+The binder is intentionally **schema-specific**, not a generic TMDL rewriter. It checks the logical ID and generation in ontology item metadata, the `BootstrapBinding = books-v1` annotations on all seven entities, and the source expression's lineage tag. It preserves unrelated definition parts and business rules, and refuses custom partitions or source expressions rather than guessing how to overwrite them. Use the default definition endpoint and verify its TMDL parts: an explicit `format=TMDL` can be rejected, exported `.platform` can contain a placeholder logical ID, and model-level annotations can be omitted. Entity-level annotations survive the round trip. A correctly bound rerun does not update the ontology again. It neither seeds data nor materializes graphs.
 
 ### Review the generated binding
 
-Review the generated partitions, expression and service-normalized TMDL before promotion. With native bootstrap, use Get Definition to inspect or export the live binding; with opt-in Git synchronization, review and commit it through Fabric source control. Confirm one Direct Lake partition per table on schema `dbo` with expression source `ScenarioLakehouse`, an expression or ALM tokens that name this workspace's `Scenario` lakehouse, every pin, both entities' `BootstrapBinding` markers and a data-backed answer in Fabric. Endpoint IDs are configuration, not credentials. Preserve the binding markers in any reviewed export.
+Review the generated partitions, expression and service-normalized TMDL before promotion. With native bootstrap, use Get Definition to inspect or export the live binding; with opt-in Git synchronization, review and commit it through Fabric source control. Confirm one Direct Lake partition per table on schema `dbo` with expression source `BooksLakehouse`, an expression or ALM tokens that name this workspace's `Books` lakehouse, every pin, every entity's `BootstrapBinding` marker and a data-backed answer in Fabric. Endpoint IDs are configuration, not credentials. Preserve the binding markers in any reviewed export.
 
-Native promotion copies those definitions, including their source references. Always attach the plan so `BindScenario` rebinds the target to its **own** lakehouse before it is used. Target-specific binding differences are expected; don't mistake them for unreviewed business-model changes or overwrite them with DEV values.
+Native promotion copies those definitions, including their source references. Always attach the plan so `BindBooks` rebinds the target to its **own** lakehouse before it is used. Target-specific binding differences are expected; don't mistake them for unreviewed business-model changes or overwrite them with DEV values.
 
 Serialize deployment and ontology authoring. The public `updateDefinition` API replaces the definition and has no conditional-update header; the notebook checks for an intervening change before updating, but cannot eliminate a concurrent-edit race. If an operation fails or times out, inspect its status before rerunning. Don't expose a partially deployed/unbound ontology to consumers.
 
@@ -85,11 +86,11 @@ Serialize deployment and ontology authoring. The public `updateDefinition` API r
 After bootstrap, the runner's `knowledge` phase writes the **physical DEV item GUIDs** it discovered into the same local tfvars file used for platform setup, with its [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then runs a reviewed plan and apply. By hand, check the entities and a data-backed question in Fabric, then set:
 
 ```hcl
-knowledge_lakehouse_id = "<dev-Scenario-lakehouse-guid>"
+knowledge_lakehouse_id = "<dev-Books-lakehouse-guid>"
 knowledge_ontologies = {
   scenario = {
-    ontology_id = "<dev-ScenarioOntology-guid>"
-    description = "Current sites, assets, their status, and which site each asset belongs to."
+    ontology_id = "<dev-BooksOntology-guid>"
+    description = "Current book performance: titles, editions, campaigns, the latest week's signals and decision options, title performance and reprint requests."
   }
 }
 ```
@@ -131,7 +132,7 @@ identify each source and its ingestion status.
 
 Terraform looks up each ontology in DEV without owning its definition, creates a native `fabricOntology` source named `<project>-<key>-ontology`, and puts it in the check-only knowledge base `<project>-ontology-check`, never in the agents' one. It also creates the Fabric IQ `UserEntraToken` connection `fabric-<key>`; the with-IQ agent's Fabric IQ tool uses `fabric-scenario`. The description helps the retrieval model select the right source.
 
-Use a separate stable map key for each additional ontology. Export its real definition to `workspace/`, supply its seed/binding actions and plan dependencies, then add its physical DEV GUID and domain description to `knowledge_ontologies`. Don't duplicate the sample logical ID for a different ontology. The reusable Terraform registration is not limited to the Site/Asset schema.
+Use a separate stable map key for each additional ontology. Export its real definition to `workspace/`, supply its seed/binding actions and plan dependencies, then add its physical DEV GUID and domain description to `knowledge_ontologies`. Don't duplicate BooksOntology's logical ID for a different ontology. The reusable Terraform registration is not limited to the books schema.
 
 Leave the map empty to use only indexed documents; the agent phase then has no Fabric IQ connection for the with-IQ agent. Nonempty registrations require `knowledge_lakehouse_id`; they belong to knowledge setup after Fabric bootstrap. Removing an entry rebuilds the check-only base and removes its Search knowledge-source registration and Fabric IQ connection, **not** the Fabric ontology or data. Ontology parameter changes update the live source in place; no index rebuild is needed.
 
@@ -165,7 +166,7 @@ Content-Type: application/json
       "content": [
         {
           "type": "text",
-          "text": "Using the live ScenarioOntology, which Asset rows have the Status value \"Maintenance\", and at which site is each asset located? Return asset names and site names."
+          "text": "Using the live BooksOntology, which TitleSignal rows have the IsMaterial value \"Yes\"? Return each signal's TitleName and SignalType."
         }
       ]
     }
@@ -177,12 +178,12 @@ Quote the values in a question: unquoted, Fabric can read a bare value as an emp
 
 For a consuming Foundry agent, a knowledge-base MCP connection would need this per-request header on its MCP tool, through [structured inputs or supported OAuth identity passthrough](https://learn.microsoft.com/azure/foundry/agents/how-to/foundry-iq-connect#optional-enforce-permissions-with-per-request-headers); creating the managed-identity connection alone does not complete ontology authentication. The shipped agents therefore never query the check-only base: the with-IQ agent reads live facts through its [Fabric IQ tool](runtime-integration.md#iq-tools) as the signed-in user, and its knowledge-base tools read only documents and public context with the project's managed identity.
 
-For an untouched seed, the example question should identify **Pump B at North Works**. Inspect the retrieval response for an `activity` entry and `references` of type `fabricOntology`, with the expected workspace and ontology IDs. A correct-sounding answer from `starter.txt` alone is **not** proof of ontology integration. Include a user without Fabric access in your derived project's authorization checks and surface denied/failed sources rather than silently substituting the document snapshot.
+For an untouched seed, the example question should return **The Glass Orchard** with its **Forecast variance** signal, among the five material signals. Inspect the retrieval response for an `activity` entry and `references` of type `fabricOntology`, with the expected workspace and ontology IDs. A correct-sounding answer from `starter.txt` alone is **not** proof of ontology integration. Include a user without Fabric access in your derived project's authorization checks and surface denied/failed sources rather than silently substituting the document snapshot.
 
 ## Extending and promoting
 
-Put consumers that need bound data after the completed **BindScenario** group, not merely after the lakehouse/seed group. For a different schema, adapt a separate binder with explicit source mappings and preserve the public definition format; don't turn the sample into an unrestricted find/replace script.
+Put consumers that need bound data after the completed **BindBooks** group, not merely after the lakehouse/seed group. For a different schema, adapt a separate binder with explicit source mappings and preserve the public definition format; don't turn BindBooks into an unrestricted find/replace script.
 
-`BindScenario` waits for the two tables' SQL metadata, but does not perform a graph load or semantic-model refresh. Those consumers still need their own readiness/refresh steps. PROD should normally omit demo seeding and use approved data ingestion; binding to a target-local lakehouse remains necessary.
+`BindBooks` waits for the seven tables' SQL metadata, but does not perform a graph load or semantic-model refresh. Those consumers still need their own readiness/refresh steps. PROD should normally omit demo seeding and use approved data ingestion; binding to a target-local lakehouse remains necessary.
 
 Both ontology and Foundry IQ source integration are preview features. Review Fabric/Foundry availability, costs and compliance boundaries for the deployment region. No live deployment or query is performed as a template-maintenance check.

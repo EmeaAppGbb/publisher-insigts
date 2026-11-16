@@ -66,7 +66,7 @@ who acts on each item and how long it can take.
 - [ ] Commit any change under `agents/` or `app/`; the runner publishes the agent definitions in the checkout and builds only committed app files.
 - [ ] Approve the agent publication (`agent-publish`) when requested.
 - [ ] Approve the image build (`app-build`) and the saved app plan (`--approve app=<sha12>`) when requested. The runner grants the app's Foundry sign-in scope as you; with `--manual-grants`, have an administrator grant it at the reported link, or let each user consent at first sign-in.
-- [ ] Open the web app URL, sign in and ask the sample question **With IQ**; accept the Fabric IQ consent card once, ask again and confirm **Pump B at North Works**. Select **Ask both** to compare the answer without IQ.
+- [ ] Open the web app URL, sign in and ask the sample question **With IQ**; accept the Fabric IQ consent card once, ask again and confirm **The Glass Orchard** and its forecast variance. Select **Ask both** to compare the answer without IQ.
 - [ ] For each additional user, assign a Foundry role on the project and read access to the required DEV Fabric items; have them sign in and repeat the check. Until a second user has, isolation is not demonstrated.
 - [ ] Retain and securely back up the deployment state.
 

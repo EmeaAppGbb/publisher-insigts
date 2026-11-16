@@ -1,0 +1,62 @@
+/// A marketing campaign for a title in one territory.
+entity Campaign
+	lineageTag: ef6975c1-1bff-4044-ab66-3888ec62f51e
+	backingTable: campaigns
+	keyProperty: CampaignId
+
+	/// Stable identifier of the campaign.
+	property CampaignId
+		dataType: string
+		lineageTag: e09a0668-5627-42ab-b157-041eaaa9ed8c
+		backingConfiguration
+			valueColumn: campaigns.campaign_id
+
+	property TitleId
+		dataType: string
+		lineageTag: 616137ef-5e9c-49ac-875c-0373ab565f6d
+		backingConfiguration
+			valueColumn: campaigns.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: 484055d4-2798-45a9-a734-2578a49def59
+		backingConfiguration
+			valueColumn: campaigns.title_name
+
+	property CampaignName
+		dataType: string
+		lineageTag: 7b65af0e-4bba-4dca-b934-8c4df4ae36dd
+		backingConfiguration
+			valueColumn: campaigns.campaign_name
+
+	property Channel
+		dataType: string
+		lineageTag: 326b1811-fec9-4eb0-b439-5edd6fb34de5
+		backingConfiguration
+			valueColumn: campaigns.channel
+
+	property Territory
+		dataType: string
+		lineageTag: 17d07b92-9d19-4cd3-84f7-0c073a3e8834
+		backingConfiguration
+			valueColumn: campaigns.territory
+
+	property StartDate
+		dataType: dateTime
+		lineageTag: e9006b47-9e69-4cd0-bd8b-4c05dd8e2188
+		backingConfiguration
+			valueColumn: campaigns.start_date
+
+	property EndDate
+		dataType: dateTime
+		lineageTag: 9f9382a8-f606-45b1-b6ae-4d7509ee1a13
+		backingConfiguration
+			valueColumn: campaigns.end_date
+
+	property BudgetGbp
+		dataType: int64
+		lineageTag: 8bbd964f-d703-43df-a901-731d22eb9d0f
+		backingConfiguration
+			valueColumn: campaigns.budget_gbp
+
+	annotation BootstrapBinding = books-v1

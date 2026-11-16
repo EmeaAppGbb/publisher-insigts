@@ -1,4 +1,4 @@
-"""BindScenario, run locally on the repository's ScenarioOntology parts against stand-ins for Fabric.
+"""BindBooks, run locally on the repository's BooksOntology parts against stand-ins for Fabric.
 
 The notebook's cells run with stand-ins for notebookutils and requests; nothing calls Fabric. The stored forms replay
 what Fabric returned for this binder's SQL endpoint form in a derived project's DEV (October 2026): CRLF line
@@ -15,22 +15,22 @@ import unittest
 
 from _support import LAKEHOUSE_ID, OTHER_ID, WORKSPACE, WORKSPACE_ID, run
 
-ONTOLOGY = WORKSPACE / "ScenarioOntology.Ontology"
+ONTOLOGY = WORKSPACE / "BooksOntology.Ontology"
 SQL_ID = "44444444-4444-4444-8444-444444444444"
 ONTOLOGY_ID = "55555555-5555-4555-8555-555555555555"
 OPERATION_ID = "66666666-6666-4666-8666-666666666666"
 SQL_HOST = "example-endpoint.datawarehouse.fabric.microsoft.com"
-WORKSPACE_NAME = "scenario-dev"
+WORKSPACE_NAME = "books-dev"
 PINS = ("ONT_WorkspaceId", "ONT_ItemId", "ONT_ItemKind", "ONT_ItemName", "ONT_WorkspaceName", "ONT_SqlEndpoint",
         "ONT_SqlDatabase", "ONT_PinnedAtUtc")
-LAKEHOUSE = {"workspaceId": WORKSPACE_ID, "id": LAKEHOUSE_ID, "type": "Lakehouse", "displayName": "Scenario",
+LAKEHOUSE = {"workspaceId": WORKSPACE_ID, "id": LAKEHOUSE_ID, "type": "Lakehouse", "displayName": "Books",
              "properties": {"defaultSchema": "dbo",
                             "sqlEndpointProperties": {"connectionString": SQL_HOST, "id": SQL_ID,
                                                       "provisioningStatus": "Success"}}}
 
 
 def modules(fabric=None):
-    """notebookutils and requests as BindScenario imports them; `fabric` answers its REST calls."""
+    """notebookutils and requests as BindBooks imports them; `fabric` answers its REST calls."""
     context = {"currentWorkspaceId": WORKSPACE_ID, "currentWorkspaceName": WORKSPACE_NAME}
     notebookutils = types.SimpleNamespace(runtime=types.SimpleNamespace(context=context),
                                           credentials=types.SimpleNamespace(getToken=lambda audience: "user-token"))
@@ -42,12 +42,12 @@ def modules(fabric=None):
 
 def binder():
     """The binder's parameter and helper cells, executed without its Fabric calls."""
-    return run("BindScenario", modules(), count=2)[0]
+    return run("BindBooks", modules(), count=2)[0]
 
 
 def run_binder(fabric, parameters=None):
-    """Every cell of BindScenario against `fabric`; returns the printed output."""
-    return run("BindScenario", modules(fabric), parameters)[1]
+    """Every cell of BindBooks against `fabric`; returns the printed output."""
+    return run("BindBooks", modules(fabric), parameters)[1]
 
 
 def encode(path, text):
@@ -82,9 +82,9 @@ def stored(parts, keep_pins=True):
 
 def onelake_binding(bound_definition):
     """A definition an earlier binder bound through OneLake, as Fabric stored it: of the pins only ONT_PinnedAtUtc."""
-    onelake = ("expression ScenarioLakehouse =\n\t\tlet\n\t\t\tSource = AzureStorage.DataLake("
+    onelake = ("expression BooksLakehouse =\n\t\tlet\n\t\t\tSource = AzureStorage.DataLake("
                f'"https://onelake.dfs.fabric.microsoft.com/{WORKSPACE_ID}/{LAKEHOUSE_ID}", [HierarchicalNavigation=true])\n'
-               "\t\tin\n\t\t\tSource\n\tlineageTag: afcdf5a6-abb9-4722-81d6-c540ac4b4433\n")
+               "\t\tin\n\t\t\tSource\n\tlineageTag: e6cc1768-4716-4cea-9291-f1284a1a9cd1\n")
     bound = bound_definition(repository_parts(), LAKEHOUSE, WORKSPACE_NAME)
     return stored(dict(bound, **{"expressions.tmdl": encode("expressions.tmdl", onelake)}), keep_pins=False)
 
@@ -111,14 +111,14 @@ class Response:
 
 
 class FakeFabric:
-    """The Fabric REST API as BindScenario uses it, over one workspace's items and ontology definition."""
+    """The Fabric REST API as BindBooks uses it, over one workspace's items and ontology definition."""
 
     def __init__(self, parts, logical_id=None, generation=2, refresh=None, keep_rules=True, keep_pins=True):
         self.parts = dict(parts)
-        self.item = {"id": ONTOLOGY_ID, "type": "Ontology", "workspaceId": WORKSPACE_ID, "displayName": "ScenarioOntology",
+        self.item = {"id": ONTOLOGY_ID, "type": "Ontology", "workspaceId": WORKSPACE_ID, "displayName": "BooksOntology",
                      "logicalId": logical_id or json.loads(text_of(parts, ".platform"))["config"]["logicalId"],
                      "properties": {"generation": generation}}
-        self.items = [{"id": LAKEHOUSE_ID, "type": "Lakehouse", "displayName": "Scenario", "workspaceId": WORKSPACE_ID},
+        self.items = [{"id": LAKEHOUSE_ID, "type": "Lakehouse", "displayName": "Books", "workspaceId": WORKSPACE_ID},
                       dict(self.item)]
         self.lakehouse = copy.deepcopy(LAKEHOUSE)
         self.refresh = refresh or {}
@@ -178,21 +178,21 @@ class BindingCheck(unittest.TestCase):
     def assert_bound_to(self, parts, lakehouse_id=LAKEHOUSE_ID, sql_id=SQL_ID):
         # The exact form the runner's binding check reads: the SQL endpoint host and GUID in a let ... in block.
         self.assertEqual(text_of(parts, "expressions.tmdl"),
-                         "expression ScenarioLakehouse =\n\t\tlet\n"
+                         "expression BooksLakehouse =\n\t\tlet\n"
                          f'\t\t\tdatabase = Sql.Database("{SQL_HOST}", "{sql_id}")\n'
                          f"\t\tin\n\t\t\tdatabase\n\tlineageTag: {self.binder['source_lineage_tag']}\n")
         for table in self.binder["table_names"]:
             text = text_of(parts, f"tables/{table}.tmdl").replace("\r\n", "\n")
             self.assertIn(f"\tpartition {table} = entity\n\t\tmode: directLake\n", text)
             self.assertIn(f"\t\t\tentityName: {table}\n\t\t\tschemaName: dbo\n", text)
-            self.assertIn("\t\t\texpressionSource: ScenarioLakehouse", text)
+            self.assertIn("\t\t\texpressionSource: BooksLakehouse", text)
             values = pins(text)
             self.assertEqual(sorted(values), sorted(PINS), table)
             self.assertRegex(values.pop("ONT_PinnedAtUtc"), r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
             self.assertEqual(values, {"ONT_WorkspaceId": WORKSPACE_ID, "ONT_ItemId": lakehouse_id,
-                                      "ONT_ItemKind": "Lakehouse", "ONT_ItemName": "Scenario",
+                                      "ONT_ItemKind": "Lakehouse", "ONT_ItemName": "Books",
                                       "ONT_WorkspaceName": WORKSPACE_NAME, "ONT_SqlEndpoint": SQL_HOST,
-                                      "ONT_SqlDatabase": "Scenario"}, table)
+                                      "ONT_SqlDatabase": "Books"}, table)
 
 
 class BindingTests(BindingCheck):
@@ -202,7 +202,7 @@ class BindingTests(BindingCheck):
         model = (ONTOLOGY / "model.tmdl").read_text(encoding="utf-8")
         self.assertEqual(list(self.binder["table_names"]), re.findall(r"(?m)^ref table (\S+)$", model))
         self.assertEqual(list(self.binder["entity_names"]), re.findall(r"(?m)^ref entity (\S+)$", model))
-        self.assertEqual(self.binder["expression_name"], "ScenarioLakehouse")
+        self.assertEqual(self.binder["expression_name"], "BooksLakehouse")
         for entity in self.binder["entity_names"]:
             lines = (ONTOLOGY / "entities" / f"{entity}.tmdl").read_text(encoding="utf-8").splitlines()
             self.assertIn(f"\t{self.binder['binding_marker']}", lines, entity)
@@ -222,8 +222,8 @@ class BindingTests(BindingCheck):
 
     def test_the_stored_binding_with_its_pins_is_current(self):
         kept = stored(self.bind(repository_parts()))
-        self.assertIn("\r\n", text_of(kept, "tables/demo_assets.tmdl"))
-        self.assertEqual(sorted(pins(text_of(kept, "tables/demo_assets.tmdl"))), sorted(PINS))
+        self.assertIn("\r\n", text_of(kept, "tables/title_signals.tmdl"))
+        self.assertEqual(sorted(pins(text_of(kept, "tables/title_signals.tmdl"))), sorted(PINS))
         self.assertIn(alm(), text_of(kept, "expressions.tmdl"))
         self.assertEqual(self.bind(kept), kept)
 
@@ -235,17 +235,17 @@ class BindingTests(BindingCheck):
         kept = stored(self.bind(repository_parts()))
         for pin in PINS:
             with self.subTest(pin=pin):
-                text = text_of(kept, "tables/demo_sites.tmdl")
-                missing = dict(kept, **{"tables/demo_sites.tmdl": encode(
-                    "tables/demo_sites.tmdl", re.sub(rf"(?m)^\t\tannotation {pin} = [^\r\n]*\r\n", "", text))})
+                text = text_of(kept, "tables/titles.tmdl")
+                missing = dict(kept, **{"tables/titles.tmdl": encode(
+                    "tables/titles.tmdl", re.sub(rf"(?m)^\t\tannotation {pin} = [^\r\n]*\r\n", "", text))})
                 rebound = self.bind(missing)
                 self.assertNotEqual(rebound, missing)
-                self.assertEqual(sorted(pins(text_of(rebound, "tables/demo_sites.tmdl"))), sorted(PINS))
-                self.assertEqual(rebound["tables/demo_assets.tmdl"], kept["tables/demo_assets.tmdl"])
+                self.assertEqual(sorted(pins(text_of(rebound, "tables/titles.tmdl"))), sorted(PINS))
+                self.assertEqual(rebound["tables/title_signals.tmdl"], kept["tables/title_signals.tmdl"])
 
     def test_an_earlier_onelake_binding_is_replaced_by_the_sql_endpoint(self):
         legacy = onelake_binding(self.binder["bound_definition"])
-        self.assertEqual(sorted(pins(text_of(legacy, "tables/demo_assets.tmdl"))), ["ONT_PinnedAtUtc"])
+        self.assertEqual(sorted(pins(text_of(legacy, "tables/title_signals.tmdl"))), ["ONT_PinnedAtUtc"])
         self.assert_bound_to(self.bind(legacy))
 
     def test_another_target_is_rebound(self):
@@ -256,7 +256,7 @@ class BindingTests(BindingCheck):
             with self.subTest(foreign=foreign):
                 self.assert_bound_to(self.bind(replace_text(kept, "expressions.tmdl", alm(), foreign)))
         moved = replace_text(kept, "expressions.tmdl", alm(), alm(lakehouse=OTHER_ID))
-        moved = replace_text(moved, "tables/demo_sites.tmdl", f"ONT_ItemId = {LAKEHOUSE_ID}", f"ONT_ItemId = {OTHER_ID}")
+        moved = replace_text(moved, "tables/titles.tmdl", f"ONT_ItemId = {LAKEHOUSE_ID}", f"ONT_ItemId = {OTHER_ID}")
         self.assert_bound_to(self.bind(moved))
 
     def test_custom_sources_and_partitions_are_refused(self):
@@ -268,15 +268,15 @@ class BindingTests(BindingCheck):
         with self.assertRaisesRegex(ValueError, "unrecognized source expression"):
             self.bind(replace_text(kept, "expressions.tmdl", "\t\tin\r\n", "\t\t\tunused = 1,\r\n\t\tin\r\n"))
         with self.assertRaisesRegex(ValueError, "Unexpected expressionSource"):
-            self.bind(replace_text(kept, "tables/demo_assets.tmdl", "expressionSource: ScenarioLakehouse",
+            self.bind(replace_text(kept, "tables/title_signals.tmdl", "expressionSource: BooksLakehouse",
                                    "expressionSource: OtherSource"))
         with self.assertRaisesRegex(ValueError, "custom partitions"):
-            self.bind(replace_text(kept, "tables/demo_assets.tmdl", "partition demo_assets = entity",
+            self.bind(replace_text(kept, "tables/title_signals.tmdl", "partition title_signals = entity",
                                    "partition custom = entity"))
 
     def test_every_entity_needs_the_binding_marker(self):
-        unmarked = replace_text(repository_parts(), "entities/Asset.tmdl", "\tannotation BootstrapBinding = site-asset-v1\n", "")
-        with self.assertRaisesRegex(ValueError, "Asset entity is missing its binding marker"):
+        unmarked = replace_text(repository_parts(), "entities/TitleSignal.tmdl", "\tannotation BootstrapBinding = books-v1\n", "")
+        with self.assertRaisesRegex(ValueError, "TitleSignal entity is missing its binding marker"):
             self.bind(unmarked)
 
     def test_a_lakehouse_in_another_workspace_is_refused(self):
@@ -290,11 +290,13 @@ class RunTests(BindingCheck):
         output = run_binder(fabric)
         self.assertEqual(len(fabric.refreshes), 1)
         self.assertEqual({key: fabric.refreshes[0][key] for key in ("recreateTables", "tables")},
-                         {"recreateTables": False, "tables": [{"schema": "dbo", "tableNames": ["demo_sites", "demo_assets"]}]})
+                         {"recreateTables": False, "tables": [{"schema": "dbo", "tableNames": list(self.binder["table_names"])}]})
+        self.assertEqual(sorted(self.binder["table_names"]), sorted(path[len("tables/"):-len(".tmdl")]
+                                                                    for path in repository_parts() if path.startswith("tables/")))
         self.assertEqual(len(fabric.updates), 1)
         self.assert_bound_to(fabric.updates[0])
         self.assertIn(alm(), text_of(fabric.parts, "expressions.tmdl"))
-        self.assertIn("Bound ScenarioOntology.", output)
+        self.assertIn("Bound BooksOntology.", output)
         self.assertIn(f"Lakehouse GUID: {LAKEHOUSE_ID}\nOntology GUID: {ONTOLOGY_ID}\n", output)
         refreshed = fabric.calls.index(("POST", f"/v1/workspaces/{WORKSPACE_ID}/sqlEndpoints/{SQL_ID}/refreshMetadata"))
         updated = fabric.calls.index(("POST", f"/v1/workspaces/{WORKSPACE_ID}/ontologies/{ONTOLOGY_ID}/updateDefinition"))
@@ -303,7 +305,7 @@ class RunTests(BindingCheck):
     def test_a_rerun_leaves_a_bound_ontology_and_its_pins_untouched(self):
         kept = stored(self.bind(repository_parts()))
         fabric = FakeFabric(kept)
-        self.assertIn("ScenarioOntology is already bound to the current workspace's lakehouse.", run_binder(fabric))
+        self.assertIn("BooksOntology is already bound to the current workspace's lakehouse.", run_binder(fabric))
         self.assertEqual(fabric.updates, [])
         self.assertEqual(fabric.parts, kept, "ONT_PinnedAtUtc included")
 
@@ -313,7 +315,7 @@ class RunTests(BindingCheck):
         self.assertEqual(len(fabric.updates), 1)
         self.assert_bound_to(fabric.updates[0])
         self.assertIn(alm(), text_of(fabric.parts, "expressions.tmdl"))
-        self.assertIn("Bound ScenarioOntology.", output)
+        self.assertIn("Bound BooksOntology.", output)
 
     def test_a_read_back_without_the_pins_fails(self):
         fabric = FakeFabric(repository_parts(), keep_pins=False)
@@ -341,33 +343,33 @@ class RunTests(BindingCheck):
 
     def test_only_the_reviewed_new_experience_ontology_is_bound(self):
         for fabric in (FakeFabric(repository_parts(), logical_id=LAKEHOUSE_ID), FakeFabric(repository_parts(), generation=1)):
-            with self.subTest(item=fabric.item), self.assertRaisesRegex(ValueError, "new-experience ScenarioOntology"):
+            with self.subTest(item=fabric.item), self.assertRaisesRegex(ValueError, "new-experience BooksOntology"):
                 run_binder(fabric)
             self.assertEqual(fabric.updates, [])
 
     def test_each_name_resolves_to_one_item_of_the_current_workspace(self):
         fabric = FakeFabric(repository_parts())
         fabric.items.append(dict(fabric.items[0], id=OTHER_ID))
-        with self.assertRaisesRegex(ValueError, "Expected one Lakehouse named Scenario"):
+        with self.assertRaisesRegex(ValueError, "Expected one Lakehouse named Books"):
             run_binder(fabric)
         self.assertEqual(fabric.updates, [])
 
     def test_a_failed_table_refresh_stops_the_run(self):
-        fabric = FakeFabric(repository_parts(), refresh={"demo_assets": "Failure"})
-        with self.assertRaisesRegex(RuntimeError, "SQL metadata is not ready for dbo.demo_assets"):
+        fabric = FakeFabric(repository_parts(), refresh={"title_signals": "Failure"})
+        with self.assertRaisesRegex(RuntimeError, "SQL metadata is not ready for dbo.title_signals"):
             run_binder(fabric)
         self.assertEqual(fabric.updates, [])
 
     def test_a_concurrent_edit_stops_the_update(self):
         fabric = FakeFabric(repository_parts())
         fabric.edits = [lambda parts: parts,
-                        lambda parts: replace_text(parts, "entities/Site.tmdl", "An operating site", "A site")]
+                        lambda parts: replace_text(parts, "entities/Title.tmdl", "A fictional book title", "A book title")]
         with self.assertRaisesRegex(RuntimeError, "changed during binding"):
             run_binder(fabric)
         self.assertEqual(fabric.updates, [])
 
     def test_an_update_that_loses_business_rules_fails(self):
-        rule = encode("rules/MaintenanceNeedsReview.tmdl", "/// A business rule a scenario author added.\n")
+        rule = encode("rules/ReprintNeedsReview.tmdl", "/// A business rule a scenario author added.\n")
         fabric = FakeFabric(dict(repository_parts(), **{rule["path"]: rule}), keep_rules=False)
         with self.assertRaisesRegex(RuntimeError, "changed its business rules"):
             run_binder(fabric)

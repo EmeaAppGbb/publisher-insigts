@@ -1,0 +1,54 @@
+table reprint_requests
+	lineageTag: 531c2294-668c-4096-bdd7-3e7dde5c4d2d
+
+	column request_id
+		dataType: string
+		sourceColumn: request_id
+
+	column signal_id
+		dataType: string
+		sourceColumn: signal_id
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column title_name
+		dataType: string
+		sourceColumn: title_name
+
+	column edition_id
+		dataType: string
+		sourceColumn: edition_id
+
+	column territory
+		dataType: string
+		sourceColumn: territory
+
+	column quantity
+		dataType: int64
+		sourceColumn: quantity
+
+	column expedited
+		dataType: string
+		sourceColumn: expedited
+
+	column rationale
+		dataType: string
+		sourceColumn: rationale
+
+	column evidence
+		dataType: string
+		sourceColumn: evidence
+
+	column approver_name
+		dataType: string
+		sourceColumn: approver_name
+
+	column approved_at
+		dataType: dateTime
+		sourceColumn: approved_at
+
+	column status
+		dataType: string
+		sourceColumn: status

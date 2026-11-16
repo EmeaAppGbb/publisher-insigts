@@ -1,0 +1,148 @@
+/// A title's sales, forecast and public signals in the latest week.
+entity TitlePerformance
+	lineageTag: 1a935ede-bcce-430d-9533-3c039fe43bd6
+	backingTable: title_performance
+	keyProperty: TitleId
+
+	/// Stable identifier of the title.
+	property TitleId
+		dataType: string
+		lineageTag: 78580610-5908-4277-ab51-26f178fc390e
+		backingConfiguration
+			valueColumn: title_performance.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: 444f8c25-55f8-4b6e-b3d2-d40ed32bd7c8
+		backingConfiguration
+			valueColumn: title_performance.title_name
+
+	property AuthorName
+		dataType: string
+		lineageTag: 3814c919-0f9c-4f70-a146-45e5e3a8ed0b
+		backingConfiguration
+			valueColumn: title_performance.author_name
+
+	property Genre
+		dataType: string
+		lineageTag: 31abec65-7c80-4328-b8a7-420d7f27e323
+		backingConfiguration
+			valueColumn: title_performance.genre
+
+	property AsOfWeek
+		dataType: dateTime
+		lineageTag: 64a9cd00-f2ab-4a5d-8efa-b217a898aaaa
+		backingConfiguration
+			valueColumn: title_performance.as_of_week
+
+	property UnitsThisWeek
+		dataType: int64
+		lineageTag: b03c64df-4e04-4b09-a904-1466bb8adc15
+		backingConfiguration
+			valueColumn: title_performance.units_week
+
+	property UnitsPreviousWeek
+		dataType: int64
+		lineageTag: 3493123b-d19a-4cbc-903c-117d123d7304
+		backingConfiguration
+			valueColumn: title_performance.units_prev_week
+
+	property WeekChangePct
+		dataType: double
+		lineageTag: 8bb171d2-f40d-4c67-8acb-8dc8c2a6e4af
+		backingConfiguration
+			valueColumn: title_performance.week_change_pct
+
+	property UnitsLast4Weeks
+		dataType: int64
+		lineageTag: 00fdb9ae-5e20-4a1d-b201-f3c1b35b33a6
+		backingConfiguration
+			valueColumn: title_performance.units_last_4w
+
+	property ForecastLast4Weeks
+		dataType: int64
+		lineageTag: bb9da956-82c8-4e52-89b9-7da3551703ed
+		backingConfiguration
+			valueColumn: title_performance.forecast_last_4w
+
+	property ActualVsForecast
+		dataType: double
+		lineageTag: 768c2619-42a3-477e-b1ab-34ef427ea0fe
+		backingConfiguration
+			valueColumn: title_performance.actual_vs_forecast
+
+	/// Units sold since the first week of data.
+	property UnitsToDate
+		dataType: int64
+		lineageTag: b12d9c5e-3bf3-4160-83ee-ce078290cc3b
+		backingConfiguration
+			valueColumn: title_performance.units_to_date
+
+	property RevenueLast4WeeksGbp
+		dataType: int64
+		lineageTag: 7abb2bf8-2f61-479b-95f3-5a8da1ab0c3f
+		backingConfiguration
+			valueColumn: title_performance.revenue_last_4w_gbp
+
+	property TopTerritory
+		dataType: string
+		lineageTag: b9406fa0-8611-40db-ab0b-73c2c601e2f2
+		backingConfiguration
+			valueColumn: title_performance.top_territory
+
+	property TopChannel
+		dataType: string
+		lineageTag: fb14dfff-565c-43c7-9bbd-b9985de719e2
+		backingConfiguration
+			valueColumn: title_performance.top_channel
+
+	property TopFormat
+		dataType: string
+		lineageTag: 658ecc20-dbdd-483e-8104-e3f978b768ad
+		backingConfiguration
+			valueColumn: title_performance.top_format
+
+	/// Rank by units this week; 1 is the best seller.
+	property PortfolioRank
+		dataType: int64
+		lineageTag: cf6cc13a-ed78-4b16-89bc-0976e5e777d8
+		backingConfiguration
+			valueColumn: title_performance.portfolio_rank
+
+	property SearchIndex
+		dataType: int64
+		lineageTag: 86c85784-63a6-43f6-b42b-7db100c668bf
+		backingConfiguration
+			valueColumn: title_performance.search_index
+
+	property SearchMomentumChangePct
+		dataType: double
+		lineageTag: 304b4f57-6391-4593-9c54-92c55dd5409d
+		backingConfiguration
+			valueColumn: title_performance.search_momentum_change_pct
+
+	property MediaMentions4Weeks
+		dataType: int64
+		lineageTag: 420fbb94-95c5-4e8e-aaff-2c45fe76af84
+		backingConfiguration
+			valueColumn: title_performance.media_mentions_4w
+
+	property ReviewCount
+		dataType: int64
+		lineageTag: 0b9cf263-53ad-4681-8ab3-2a729c66d02e
+		backingConfiguration
+			valueColumn: title_performance.review_count
+
+	property AverageRating
+		dataType: double
+		lineageTag: da8d5667-f8b0-4496-9c3e-d3b5c9ac541f
+		backingConfiguration
+			valueColumn: title_performance.avg_rating
+
+	property LiveCampaign
+		dataType: string
+		lineageTag: c2953aec-c292-415a-b8a1-8ffb73f90398
+		backingConfiguration
+			valueColumn: title_performance.live_campaign
+
+	annotation BootstrapBinding = books-v1

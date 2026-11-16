@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Lakehouse",
+    "displayName": "Books",
+    "description": "Fictional book portfolio tables and documents. Data is populated by SeedBooks and ComputeBookSignals, not Git."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "758429ae-f72b-4aae-921e-23d7c85f5cf3"
+  }
+}

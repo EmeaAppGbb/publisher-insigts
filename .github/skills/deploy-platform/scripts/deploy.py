@@ -133,10 +133,12 @@ SEARCH_DEFERRED = {"search_identity_ready": "false"}
 
 
 class NotebookRun(NamedTuple):
-    """A bootstrap notebook (an item key in Scenario.items), its parameters and whether a completed run suffices."""
+    """A bootstrap notebook (an item key in Scenario.items), its parameters, whether a completed run suffices and the
+    earlier notebooks whose output it reads, so it runs again after any of them does."""
     item: str
     parameters: dict
     skip_completed: bool
+    reads: tuple = ()
 
 
 class Scenario(NamedTuple):
@@ -165,27 +167,33 @@ class Scenario(NamedTuple):
 
 
 SCENARIO = Scenario(
-    items=(("lakehouse", "Lakehouse", "Scenario"), ("seed", "Notebook", "SeedScenario"),
-           ("ontology", "Ontology", "ScenarioOntology"), ("bind", "Notebook", "BindScenario")),
+    items=(("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
+           ("signals", "Notebook", "ComputeBookSignals"), ("ontology", "Ontology", "BooksOntology"),
+           ("bind", "Notebook", "BindBooks")),
     plan="Bootstrap",
     registration="scenario",
-    registration_description="Current sites, assets, their status, and which site each asset belongs to.",
-    tables=("demo_sites", "demo_assets"),
-    expression="ScenarioLakehouse",
-    runs=(NotebookRun("seed", {"lakehouse_name": "Scenario", "allow_other_workspaces": False}, True),
-          NotebookRun("bind", {"lakehouse_name": "Scenario", "ontology_name": "ScenarioOntology"}, False)),
+    registration_description=("Current book performance: titles, editions, campaigns, the latest week's signals and "
+                              "decision options, title performance and reprint requests."),
+    tables=("titles", "editions", "campaigns", "title_signals", "decision_options", "title_performance",
+            "reprint_requests"),
+    expression="BooksLakehouse",
+    runs=(NotebookRun("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
+          NotebookRun("signals", {"lakehouse_name": "Books"}, True, ("seed",)),
+          NotebookRun("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False)),
     # The value is quoted: unquoted, Fabric sometimes read a bare value as an empty one and found nothing.
-    ontology_question=("Using the live ScenarioOntology, which Asset rows have the Status value \"Maintenance\", and "
-                       "at which site is each asset located? Return asset names and site names."),
-    document_question=("According to the indexed starter document, what does Git store, what does SeedScenario "
-                       "materialize, and which source should be used for current entity values? Answer from the "
-                       "OneLake document and cite it."),
+    ontology_question=("Using the live BooksOntology, which TitleSignal rows have the IsMaterial value \"Yes\"? "
+                       "Return each signal's TitleName and SignalType."),
+    document_question=("According to the indexed starter document, what does Git store, what do SeedBooks and "
+                       "ComputeBookSignals write, and which source should be used for current sales, stock and "
+                       "signals? Answer from the OneLake document and cite it."),
     document_source="documents",
-    public_context_question=("What does manufacturer and industry guidance recommend for the routine preventive "
-                             "maintenance of industrial centrifugal pumps?"),
-    # Seeded rows: the live ontology source must return them in its own source data, not only the starter document.
-    expected_facts=("Pump B", "North Works"),
-    app_question='Ask "Which assets are in maintenance, and at which site?" with IQ and expect Pump B at North Works.',
+    public_context_question=("What public trends are shaping literary fiction sales and literary prize coverage in "
+                             "the UK this autumn?"),
+    # Computed rows: the live ontology source must return them in its own source data, not only the starter document.
+    # They hold for the seeded weeks and after the demo advances a week.
+    expected_facts=("The Glass Orchard", "Forecast variance"),
+    app_question=('Ask "What needs my attention this week?" with IQ and expect The Glass Orchard, with a '
+                  'Forecast variance signal.'),
 )
 # Item types whose reviewed definitions --update-definitions may write over a live item; data items never.
 UPDATABLE_TYPES = ("Notebook", "Ontology", "DeploymentPlan")
@@ -2255,11 +2263,16 @@ def finish_update(ctx, native, name):
     record = native["updates"][name]
     native.setdefault("definitions", {})[name] = record["digest"]
     native.setdefault("commits", {})[name] = record["commit"]
-    # An updated bootstrap notebook runs again, so its new logic takes effect.
+    # An updated bootstrap notebook runs again, so its new logic takes effect, and so does every later notebook that
+    # reads its output.
     if name in {scenario_name(step.item) for step in SCENARIO.runs}:
-        rerun = native.setdefault("rerun", [])
-        if name not in rerun:
-            rerun.append(name)
+        rerun, queued = native.setdefault("rerun", []), {name}
+        for step in SCENARIO.runs:
+            step_name = scenario_name(step.item)
+            if step_name in queued or queued & {scenario_name(item) for item in step.reads}:
+                queued.add(step_name)
+                if step_name not in rerun:
+                    rerun.append(step_name)
     ctx.state.save()
 
 

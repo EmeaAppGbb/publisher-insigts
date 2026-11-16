@@ -26,7 +26,7 @@ Load the matching repository skill before its workflow:
 
 ## Always-on guardrails
 
-- Everything in the sample is fictional: its sites, assets, documents and mail. Never write a real customer, company or person name into the repository.
+- Everything in the scenario is fictional: its titles, authors, imprints, figures, documents and mail. Never write a real customer, company or person name into the repository, including the client this proof of concept is for.
 - Never run live `plan`, `apply`, `destroy`, notebook execution or deployment tests as a template-maintenance check. Live work requires a derived repository and an explicitly chosen target.
 - Route "deploy the platform" to the complete DEV workflow, not just infrastructure, through the [deterministic runner](docs/development.md#deploy-deterministically). Use one confirmed execution host/checkout/backend throughout; do not create duplicate state in an App worktree. Its `signin` phase completes every CLI sign-in, including the Microsoft Foundry token the agent phase uses, before anything is created; `--through verify` defers the agents and app. Require plan and action approvals and distinguish deployed resources from verified readiness.
 - Do not delete cloud assets, local state or ignored configuration without explicit permission. Preserve unrelated user changes and staging.

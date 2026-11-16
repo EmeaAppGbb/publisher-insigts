@@ -1,0 +1,87 @@
+/// An approved request to reprint an edition for a territory.
+entity ReprintRequest
+	lineageTag: 539e7089-6eb8-4a54-b031-302bf1c285c0
+	backingTable: reprint_requests
+	keyProperty: RequestId
+
+	/// Identifier the reprint request service assigned.
+	property RequestId
+		dataType: string
+		lineageTag: cdb0ad5a-b101-4d76-b4c4-4f473989ef80
+		backingConfiguration
+			valueColumn: reprint_requests.request_id
+
+	property SignalId
+		dataType: string
+		lineageTag: 8655eac2-a94d-4d7e-acf1-e1c40af1d7ca
+		backingConfiguration
+			valueColumn: reprint_requests.signal_id
+
+	property TitleId
+		dataType: string
+		lineageTag: 29b1b6e1-3ed8-4036-891b-b760cd1dcf4d
+		backingConfiguration
+			valueColumn: reprint_requests.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: b7f4cf53-381f-46d0-b946-076b5b9ad430
+		backingConfiguration
+			valueColumn: reprint_requests.title_name
+
+	property EditionId
+		dataType: string
+		lineageTag: 3e45297a-b7af-4e8e-8c7d-1b3b515d65e2
+		backingConfiguration
+			valueColumn: reprint_requests.edition_id
+
+	property Territory
+		dataType: string
+		lineageTag: b61b37d6-e174-472b-bfd3-633cab7e6aa6
+		backingConfiguration
+			valueColumn: reprint_requests.territory
+
+	property Quantity
+		dataType: int64
+		lineageTag: 84a450b0-41ec-4803-87a8-01aadf429647
+		backingConfiguration
+			valueColumn: reprint_requests.quantity
+
+	/// Yes for an expedited reprint.
+	property Expedited
+		dataType: string
+		lineageTag: 8e179976-d4e0-4a52-8734-89587a213b01
+		backingConfiguration
+			valueColumn: reprint_requests.expedited
+
+	property Rationale
+		dataType: string
+		lineageTag: 9d1103a0-42df-48fa-b9ab-1d815423d491
+		backingConfiguration
+			valueColumn: reprint_requests.rationale
+
+	property Evidence
+		dataType: string
+		lineageTag: 8b4fe70d-65e8-49a9-bba0-d4b185b9d4ee
+		backingConfiguration
+			valueColumn: reprint_requests.evidence
+
+	property ApproverName
+		dataType: string
+		lineageTag: 52fc967f-28a7-40b5-b508-469f14b13f04
+		backingConfiguration
+			valueColumn: reprint_requests.approver_name
+
+	property ApprovedAt
+		dataType: dateTime
+		lineageTag: f9de3f57-8990-4125-9fbe-3c074afd9037
+		backingConfiguration
+			valueColumn: reprint_requests.approved_at
+
+	property Status
+		dataType: string
+		lineageTag: 7939b0cd-419f-4bc0-864a-c2e078c07c7d
+		backingConfiguration
+			valueColumn: reprint_requests.status
+
+	annotation BootstrapBinding = books-v1

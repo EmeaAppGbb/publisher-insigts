@@ -1,0 +1,196 @@
+/// A commercial signal for a title in the latest week, computed by ComputeBookSignals.
+entity TitleSignal
+	lineageTag: fefd10ee-a5e8-42bb-b6f0-cbd714a90352
+	backingTable: title_signals
+	keyProperty: SignalId
+
+	/// Identifier of the signal for its week.
+	property SignalId
+		dataType: string
+		lineageTag: 9d7595de-73a8-4adb-8863-7e7b66e7c9c6
+		backingConfiguration
+			valueColumn: title_signals.signal_id
+
+	property TitleId
+		dataType: string
+		lineageTag: 2eddd217-bddc-413f-b0c3-2cfe340e7b96
+		backingConfiguration
+			valueColumn: title_signals.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: 1e3d9aa9-2e00-43e7-b207-624fef82b0ee
+		backingConfiguration
+			valueColumn: title_signals.title_name
+
+	property AuthorName
+		dataType: string
+		lineageTag: 7216e75e-fa53-4411-9705-7a568b473af8
+		backingConfiguration
+			valueColumn: title_signals.author_name
+
+	/// Inventory risk, Excess inventory, Forecast variance, Public momentum or Marketing opportunity.
+	property SignalType
+		dataType: string
+		lineageTag: 026db181-997e-418d-808e-d051ef73a5b1
+		backingConfiguration
+			valueColumn: title_signals.signal_type
+
+	/// The print edition, for an inventory signal.
+	property EditionId
+		dataType: string
+		lineageTag: 2389085e-ee3b-4f0a-841e-a4888ea83f29
+		backingConfiguration
+			valueColumn: title_signals.edition_id
+
+	property Format
+		dataType: string
+		lineageTag: a993dd60-34ce-468a-8d07-d0aa60d3fd79
+		backingConfiguration
+			valueColumn: title_signals.format
+
+	/// UK, US or ANZ, for an inventory signal.
+	property Territory
+		dataType: string
+		lineageTag: 15ac9821-6114-435b-a977-e21c16e0cb1b
+		backingConfiguration
+			valueColumn: title_signals.territory
+
+	/// Start of the latest complete week the signal describes.
+	property AsOfWeek
+		dataType: dateTime
+		lineageTag: 1c9ddb07-d34b-4bf5-9f78-a40da35748a5
+		backingConfiguration
+			valueColumn: title_signals.as_of_week
+
+	property FirstDetectedWeek
+		dataType: dateTime
+		lineageTag: 823f4b3d-b910-460b-bb41-cb94abb5a4c9
+		backingConfiguration
+			valueColumn: title_signals.first_detected_week
+
+	/// Empty when the signal is not material.
+	property MaterialSinceWeek
+		dataType: dateTime
+		lineageTag: a0c6865c-86a5-485a-853e-cda241e4b453
+		backingConfiguration
+			valueColumn: title_signals.material_since_week
+
+	property Headline
+		dataType: string
+		lineageTag: acdf4497-0695-4cf6-8293-dfcc5dc0e182
+		backingConfiguration
+			valueColumn: title_signals.headline
+
+	/// Title units over forecast units in the last four weeks.
+	property ActualVsForecast
+		dataType: double
+		lineageTag: 7ab275e0-595f-4d3b-9789-b0e004efbaf3
+		backingConfiguration
+			valueColumn: title_signals.actual_vs_forecast
+
+	property UnitsLast4Weeks
+		dataType: int64
+		lineageTag: a210e3d2-3955-4a10-9024-55788bed9373
+		backingConfiguration
+			valueColumn: title_signals.units_last_4w
+
+	property ForecastLast4Weeks
+		dataType: int64
+		lineageTag: fefac4ae-984d-46d8-815f-257c78731ea6
+		backingConfiguration
+			valueColumn: title_signals.forecast_last_4w
+
+	property StockOnHand
+		dataType: int64
+		lineageTag: 5a5efdba-d6cc-4882-afea-1402fb138336
+		backingConfiguration
+			valueColumn: title_signals.stock_on_hand
+
+	property StockOnOrder
+		dataType: int64
+		lineageTag: 165e73d3-5f9e-4df7-ad5d-c37672e5f8f6
+		backingConfiguration
+			valueColumn: title_signals.stock_on_order
+
+	/// Days the stock on hand lasts at the last two weeks' rate.
+	property StockCoverDays
+		dataType: double
+		lineageTag: a6f41b9b-40eb-4860-8f99-b03caa60da5d
+		backingConfiguration
+			valueColumn: title_signals.stock_cover_days
+
+	property ReprintLeadTimeDays
+		dataType: int64
+		lineageTag: 6f690e26-f7bd-4680-af26-741b5b68aa1b
+		backingConfiguration
+			valueColumn: title_signals.reprint_lead_time_days
+
+	/// Net revenue lost before a standard reprint could land, in pounds.
+	property OpportunityAtRiskGbp
+		dataType: int64
+		lineageTag: 2163e0a1-33a8-4ffe-a49e-bbdb1b63e0cc
+		backingConfiguration
+			valueColumn: title_signals.opportunity_at_risk_gbp
+
+	/// Print cost of stock beyond 120 days of cover, in pounds.
+	property ExcessExposureGbp
+		dataType: int64
+		lineageTag: 73054c68-8c46-4c43-8f69-293b865610b0
+		backingConfiguration
+			valueColumn: title_signals.excess_exposure_gbp
+
+	/// Where most of the variance from forecast is.
+	property DriverTerritory
+		dataType: string
+		lineageTag: 9e4baf26-0abe-4937-8eaa-826b1221a4eb
+		backingConfiguration
+			valueColumn: title_signals.driver_territory
+
+	/// The two channels with most of the variance in that territory.
+	property DriverChannels
+		dataType: string
+		lineageTag: aa32d18f-bb57-40f9-aedb-bd2fccdd7f37
+		backingConfiguration
+			valueColumn: title_signals.driver_channels
+
+	property SearchMomentumChangePct
+		dataType: double
+		lineageTag: d82044d0-911f-424a-97be-6e403b98e281
+		backingConfiguration
+			valueColumn: title_signals.search_momentum_change_pct
+
+	property MediaMentions4Weeks
+		dataType: int64
+		lineageTag: 09f6dc60-2cec-424b-8a4a-4e9ebeb61702
+		backingConfiguration
+			valueColumn: title_signals.media_mentions_4w
+
+	/// High, Medium or Low, by the signal rules.
+	property Confidence
+		dataType: string
+		lineageTag: 21022531-98df-4bdd-9a1c-65e95f563a5c
+		backingConfiguration
+			valueColumn: title_signals.confidence
+
+	/// Yes when the signal crosses its materiality threshold.
+	property IsMaterial
+		dataType: string
+		lineageTag: f5d44b7a-89b4-4e60-bb91-d43814734cbb
+		backingConfiguration
+			valueColumn: title_signals.is_material
+
+	/// Open, or Actioned once an approved reprint request covers it.
+	property Status
+		dataType: string
+		lineageTag: e513eb32-8843-4979-b3fd-c992fc43441d
+		backingConfiguration
+			valueColumn: title_signals.status
+
+	property RecommendedOption
+		dataType: string
+		lineageTag: df743f47-562b-42a4-97ff-2db63f8bf8b5
+		backingConfiguration
+			valueColumn: title_signals.recommended_option
+
+	annotation BootstrapBinding = books-v1

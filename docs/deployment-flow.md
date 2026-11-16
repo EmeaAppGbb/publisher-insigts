@@ -29,14 +29,15 @@ The [deterministic runner](development.md#deploy-deterministically) executes the
 
 ## What Bootstrap does
 
-The [`Bootstrap` deployment plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) orders four groups:
+The [`Bootstrap` deployment plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) orders five groups:
 
-1. Deploy the `Scenario` lakehouse.
-2. Deploy and execute `SeedScenario` to insert missing demo rows and create `Files/documents/starter.txt` if absent.
-3. Deploy `ScenarioOntology` with Site/Asset entities and their relationship.
-4. Deploy and execute `BindScenario` to refresh scoped SQL metadata, bind to the target lakehouse through its SQL analytics endpoint, and expose the physical IDs needed for knowledge setup.
+1. Deploy the `Books` lakehouse.
+2. Deploy and execute `SeedBooks` to insert missing fictional book rows and create `Files/documents/starter.txt` if absent.
+3. Deploy and execute `ComputeBookSignals` to compute the latest week's signals, decision options and title performance.
+4. Deploy `BooksOntology` with its seven entities and their relationships.
+5. Deploy and execute `BindBooks` to refresh scoped SQL metadata, bind to the target lakehouse through its SQL analytics endpoint, and expose the physical IDs needed for knowledge setup.
 
-The plan itself is the fifth selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing demo rows and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) expands the four groups and promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
+The plan itself is the sixth selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing seeded rows and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) shows the template's original four groups and the promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
 
 ## Where this flow stops
 

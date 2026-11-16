@@ -1,0 +1,44 @@
+/// A fictional book title in the portfolio.
+entity Title
+	lineageTag: 3b15a8d6-e30e-4925-9251-e5e3231732f7
+	backingTable: titles
+	keyProperty: TitleId
+
+	/// Stable identifier of the title.
+	property TitleId
+		dataType: string
+		lineageTag: f814cf56-3fcb-44dc-9a56-b49b49efb03c
+		backingConfiguration
+			valueColumn: titles.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: ff8bf669-0269-4ed9-84c5-63b651303419
+		backingConfiguration
+			valueColumn: titles.title_name
+
+	property AuthorName
+		dataType: string
+		lineageTag: 1206cc92-b8fd-404c-8949-70c0ec00c053
+		backingConfiguration
+			valueColumn: titles.author_name
+
+	property Genre
+		dataType: string
+		lineageTag: 60a3dd51-687b-4b86-ab7f-b8b5136f565e
+		backingConfiguration
+			valueColumn: titles.genre
+
+	property Imprint
+		dataType: string
+		lineageTag: d6e7d4b0-07f7-49fb-b868-cf5ebb5e920e
+		backingConfiguration
+			valueColumn: titles.imprint
+
+	property PublicationDate
+		dataType: dateTime
+		lineageTag: 0cc86349-c9ac-49a6-a029-b3ec5bc482f8
+		backingConfiguration
+			valueColumn: titles.publication_date
+
+	annotation BootstrapBinding = books-v1

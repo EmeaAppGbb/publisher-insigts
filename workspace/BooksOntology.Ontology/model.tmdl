@@ -1,0 +1,19 @@
+model Model
+
+ref table titles
+ref table editions
+ref table campaigns
+ref table title_signals
+ref table decision_options
+ref table title_performance
+ref table reprint_requests
+
+ref entity Title
+ref entity Edition
+ref entity Campaign
+ref entity TitleSignal
+ref entity DecisionOption
+ref entity TitlePerformance
+ref entity ReprintRequest
+
+ref namespace default

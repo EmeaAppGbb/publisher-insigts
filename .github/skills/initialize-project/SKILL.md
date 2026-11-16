@@ -36,12 +36,12 @@ Confirm the generated file is ignored with `git check-ignore infra/terraform.tfv
 
 ## Preserve portable workspace identities
 
-Do **not** regenerate UUIDs or replace every occurrence of `Scenario`:
+Do **not** regenerate UUIDs or replace every occurrence of `Books`:
 
 - `.platform` logical IDs and deployment-plan references identify the same items across environments; keep them synchronized and stable.
-- TMDL lineage tags, `ScenarioLakehouse`, `site-asset-v1`, and the binder's sample logical ID form the sample binding contract.
-- `Scenario` / `ScenarioOntology` are workspace-local display names, not the template's project name. Keep the defaults unless the user requests a coordinated model rename; use the `fabric-workspace` skill for that change.
-- The template tables have no partitions or physical bindings. `SeedScenario` and `BindScenario` resolve the current workspace/lakehouse/ontology and SQL metadata **at runtime in Fabric**, without a saved default lakehouse attachment.
+- TMDL lineage tags, `BooksLakehouse`, `books-v1`, and the binder's ontology logical ID form the binding contract.
+- `Books` / `BooksOntology` are workspace-local display names, not the project name. Keep the defaults unless the user requests a coordinated model rename; use the `fabric-workspace` skill for that change.
+- The repository's tables have no partitions or physical bindings. `SeedBooks`, `ComputeBookSignals` and `BindBooks` resolve the current workspace/lakehouse/ontology and SQL metadata **at runtime in Fabric**, without a saved default lakehouse attachment.
 
 If a purported fresh template contains exported physical bindings or notebook attachments, stop and review their ownership using `docs/ontology-knowledge.md`. Do not delete unknown partitions or perform global GUID replacement. In a deployed derived repository, reviewed DEV binding exports are expected, and every promoted target must be rebound.
 

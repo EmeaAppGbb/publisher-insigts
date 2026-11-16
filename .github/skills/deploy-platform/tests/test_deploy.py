@@ -26,10 +26,12 @@ LAKEHOUSE = "22222222-2222-4222-8222-222222222222"
 ONTOLOGY = "33333333-3333-4333-8333-333333333333"
 SEED = "44444444-4444-4444-8444-444444444444"
 BIND = "55555555-5555-4555-8555-555555555555"
+SIGNALS = "15151515-1515-4515-8515-151515151515"
 CONNECTION = "66666666-6666-4666-8666-666666666666"
 OPERATION = "77777777-7777-4777-8777-777777777777"
 SEED_JOB = "88888888-8888-4888-8888-888888888888"
 BIND_JOB = "99999999-9999-4999-8999-999999999999"
+SIGNALS_JOB = "16161616-1616-4616-8616-161616161616"
 SQL_ENDPOINT = ("example-endpoint.datawarehouse.fabric.microsoft.com", "14141414-1414-4414-8414-141414141414")
 RERUN_JOB = "13131313-1313-4313-8313-131313131313"
 TENANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -203,10 +205,11 @@ def incoming(root):
 ITEMS = {"value": [
     {"id": LAKEHOUSE, "type": "Lakehouse", "displayName": NAMES["lakehouse"], "workspaceId": WORKSPACE},
     {"id": SEED, "type": "Notebook", "displayName": NAMES["seed"], "workspaceId": WORKSPACE},
+    {"id": SIGNALS, "type": "Notebook", "displayName": NAMES["signals"], "workspaceId": WORKSPACE},
     {"id": ONTOLOGY, "type": "Ontology", "displayName": NAMES["ontology"], "workspaceId": WORKSPACE},
     {"id": BIND, "type": "Notebook", "displayName": NAMES["bind"], "workspaceId": WORKSPACE},
 ]}
-RUNS = ((SEED, SEED_JOB), (BIND, BIND_JOB))
+RUNS = ((SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), (BIND, BIND_JOB))
 
 
 def bootstrap_http(root, connection_states=("ConnectedAndInitialized",), status=None, definitions=(True,)):
@@ -788,7 +791,7 @@ class BootstrapTests(unittest.TestCase):
         (_, body), = http.posts(r"/git/updateFromGit$")
         self.assertNotIn("deploymentPlan", body["options"])
         runs = http.posts(r"/jobs/execute/instances")
-        self.assertEqual([item in url for (url, _), (item, _) in zip(runs, RUNS)], [True, True])
+        self.assertEqual([item in url for (url, _), (item, _) in zip(runs, RUNS)], [True] * len(RUNS))
         self.assertEqual([body["executionData"]["parameters"] for _, body in runs],
                          [deploy.notebook_parameters(step.parameters) for step in deploy.SCENARIO.runs])
         self.assertEqual(runs[0][1]["executionData"]["parameters"]["allow_other_workspaces"], {"value": False, "type": "bool"})
@@ -936,39 +939,45 @@ class BootstrapTests(unittest.TestCase):
 class ScenarioContractTests(unittest.TestCase):
     """The names other owners rely on: the workspace items, the knowledge registration and the agents."""
 
-    def test_the_scenario_is_the_template_sample(self):
-        self.assertEqual(deploy.SCENARIO.items, (("lakehouse", "Lakehouse", "Scenario"), ("seed", "Notebook", "SeedScenario"),
-                                                 ("ontology", "Ontology", "ScenarioOntology"),
-                                                 ("bind", "Notebook", "BindScenario")))
+    def test_the_scenario_is_the_books_portfolio(self):
+        self.assertEqual(deploy.SCENARIO.items, (("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
+                                                 ("signals", "Notebook", "ComputeBookSignals"),
+                                                 ("ontology", "Ontology", "BooksOntology"),
+                                                 ("bind", "Notebook", "BindBooks")))
         self.assertEqual((deploy.SCENARIO.plan, deploy.SCENARIO.registration, deploy.SCENARIO.expression),
-                         ("Bootstrap", "scenario", "ScenarioLakehouse"))
-        self.assertEqual(deploy.SCENARIO.tables, ("demo_sites", "demo_assets"))
+                         ("Bootstrap", "scenario", "BooksLakehouse"))
+        self.assertEqual(deploy.SCENARIO.tables, ("titles", "editions", "campaigns", "title_signals", "decision_options",
+                                                  "title_performance", "reprint_requests"))
         self.assertEqual([(step.item, step.parameters, step.skip_completed) for step in deploy.SCENARIO.runs], [
-            ("seed", {"lakehouse_name": "Scenario", "allow_other_workspaces": False}, True),
-            ("bind", {"lakehouse_name": "Scenario", "ontology_name": "ScenarioOntology"}, False)])
-        self.assertEqual(deploy.run_order(), "SeedScenario and BindScenario")
-        self.assertEqual(deploy.SCENARIO.expected_facts, ("Pump B", "North Works"))
-        # The default knowledge_folders key, which SeedScenario's Files/documents folder fills.
+            ("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
+            ("signals", {"lakehouse_name": "Books"}, True),
+            ("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False)])
+        self.assertEqual([step.reads for step in deploy.SCENARIO.runs], [(), ("seed",), ()])
+        self.assertEqual(deploy.run_order(), "SeedBooks, ComputeBookSignals and BindBooks")
+        self.assertEqual(deploy.SCENARIO.expected_facts, ("The Glass Orchard", "Forecast variance"))
+        # The default knowledge_folders key, which SeedBooks' Files/documents folder fills.
         self.assertEqual(deploy.SCENARIO.document_source, "documents")
 
     def test_the_scenario_descriptor_is_self_consistent(self):
         lakehouse, ontology = deploy.scenario_name("lakehouse"), deploy.scenario_name("ontology")
         notebooks = {key for key, kind, _ in deploy.SCENARIO.items if kind == "Notebook"}
-        for step in deploy.SCENARIO.runs:
+        for index, step in enumerate(deploy.SCENARIO.runs):
             self.assertIn(step.item, notebooks)
+            # A notebook reads only earlier notebooks' output.
+            self.assertLessEqual(set(step.reads), {earlier.item for earlier in deploy.SCENARIO.runs[:index]})
             self.assertEqual(step.parameters["lakehouse_name"], lakehouse)
             self.assertEqual(step.parameters.get("ontology_name", ontology), ontology)
-        # One single-entity question, with the Status value quoted, about rows only the live ontology holds.
-        self.assertTrue(deploy.SCENARIO.ontology_question.startswith(f"Using the live {ontology}, which Asset rows"))
-        self.assertIn('Status value "Maintenance"', deploy.SCENARIO.ontology_question)
+        # One single-entity question, with the IsMaterial value quoted, about rows only the live ontology holds.
+        self.assertTrue(deploy.SCENARIO.ontology_question.startswith(f"Using the live {ontology}, which TitleSignal rows"))
+        self.assertIn('IsMaterial value "Yes"', deploy.SCENARIO.ontology_question)
         self.assertEqual(deploy.knowledge.registration_name(deploy.SCENARIO.registration), deploy.SCENARIO.registration)
         self.assertEqual(deploy.knowledge.description_text(deploy.SCENARIO.registration_description),
                          deploy.SCENARIO.registration_description)
         self.assertIn("indexed starter document", deploy.SCENARIO.document_question)
-        # The billable public-context question names no site, asset or other private detail.
+        # The billable public-context question names no title, author or other private detail.
         question = deploy.SCENARIO.public_context_question
-        self.assertIn("pump", question.lower())
-        for private in (*deploy.SCENARIO.expected_facts, "Pump A", "demo-", lakehouse, ontology):
+        self.assertIn("literary fiction", question.lower())
+        for private in (*deploy.SCENARIO.expected_facts, "Mara Ellison", "title-", lakehouse, ontology):
             self.assertNotIn(private, question)
         for fact in deploy.SCENARIO.expected_facts:
             self.assertIn(fact, deploy.SCENARIO.app_question)
@@ -1143,7 +1152,7 @@ class NativeBootstrapTests(unittest.TestCase):
         (_, body), = ctx.http.posts(r"/items/bulkImportDefinitions$")
         self.assertNotIn("deploymentPlan", body["options"])
         runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
-        self.assertEqual([item in url for url, (item, _) in zip(runs, RUNS)], [True, True])
+        self.assertEqual([item in url for url, (item, _) in zip(runs, RUNS)], [True] * len(RUNS))
 
 
     def accept_updates(self, ctx, response=None):
@@ -1189,7 +1198,7 @@ class NativeBootstrapTests(unittest.TestCase):
             deploy.phase_bootstrap(ctx)
         self.assertFalse(ctx.http.posts(r"/updateDefinition"))
         self.accept_updates(ctx)
-        self.jobs(ctx, (SEED, SEED_JOB))
+        self.jobs(ctx, (SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), completed=(SIGNALS,))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         self.assertIn(f"updated {NAMES['seed']}", deploy.phase_bootstrap(ctx))
         (url, body), = ctx.http.posts(r"/updateDefinition")
@@ -1197,13 +1206,15 @@ class NativeBootstrapTests(unittest.TestCase):
         parts = {part["path"]: base64.b64decode(part["payload"]) for part in body["definition"]["parts"]}
         self.assertEqual(parts, {"notebook-content.py": notebook.read_bytes(),
                                  ".platform": (notebook.parent / ".platform").read_bytes()})
-        (run, run_body), = ctx.http.posts(r"/jobs/execute/instances")
+        # The signals read the seed's tables, so they are computed again even after an earlier completed run.
+        (run, run_body), (signals, _) = ctx.http.posts(r"/jobs/execute/instances")
         self.assertIn(SEED, run)
+        self.assertIn(SIGNALS, signals)
         self.assertEqual(run_body["executionData"]["parameters"]["allow_other_workspaces"], {"value": False, "type": "bool"})
         native = ctx.state.section("bootstrap")["native"]
         self.assertEqual((native["updates"][NAMES["seed"]]["status"], native["rerun"]), ("Succeeded", []))
         deploy.phase_bootstrap(ctx)
-        self.assertEqual((len(ctx.http.posts(r"/updateDefinition")), len(ctx.http.posts(r"/jobs/execute/instances"))), (1, 1))
+        self.assertEqual((len(ctx.http.posts(r"/updateDefinition")), len(ctx.http.posts(r"/jobs/execute/instances"))), (1, 2))
 
     def test_an_updated_notebook_runs_again_even_after_an_unobserved_earlier_run(self):
         ctx = self.context()
@@ -1214,13 +1225,14 @@ class NativeBootstrapTests(unittest.TestCase):
         parameters = next(step.parameters for step in deploy.SCENARIO.runs if step.item == "seed")
         ctx.state.section("bootstrap")["jobs"] = {NAMES["seed"]: {"id": SEED_JOB, "status": "Submitted", "parameters": parameters}}
         self.accept_updates(ctx)
-        self.jobs(ctx, (SEED, RERUN_JOB))
+        self.jobs(ctx, (SEED, RERUN_JOB), (SIGNALS, SIGNALS_JOB))
         ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{SEED}/jobs/instances$"),
                                    [reply(body={"value": [{"id": SEED_JOB, "status": "Completed"}]})]))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         deploy.phase_bootstrap(ctx)
-        (run, _), = ctx.http.posts(r"/jobs/execute/instances")
+        (run, _), (signals, _) = ctx.http.posts(r"/jobs/execute/instances")
         self.assertIn(SEED, run)
+        self.assertIn(SIGNALS, signals)
         self.assertEqual(ctx.state.section("bootstrap")["jobs"][NAMES["seed"]]["id"], RERUN_JOB)
 
     def test_lakehouse_definitions_are_never_replaced(self):
@@ -1242,7 +1254,7 @@ class NativeBootstrapTests(unittest.TestCase):
         approval = self.approval(ctx)
         self.assertEqual(approval["summary"]["changes"], [{"action": "update", "address": f"Ontology {NAMES['ontology']}"}])
         self.accept_updates(ctx)
-        self.jobs(ctx, *RUNS, completed=(SEED,))
+        self.jobs(ctx, *RUNS, completed=(SEED, SIGNALS))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         self.assertIn(f"updated {NAMES['ontology']}", deploy.phase_bootstrap(ctx))
         (url, body), = ctx.http.posts(r"/updateDefinition")
@@ -1251,7 +1263,7 @@ class NativeBootstrapTests(unittest.TestCase):
         self.assertTrue({".platform", "model.tmdl"} <= paths and any(path.startswith("entities/") for path in paths))
         self.assertFalse(any(path.startswith("/") for path in paths))
         runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
-        self.assertEqual(len(runs), 1, "the seed completed already; only the binder reruns")
+        self.assertEqual(len(runs), 1, "the seed and signals completed already; only the binder reruns")
         self.assertIn(BIND, runs[0])
 
     def test_an_update_accepted_without_a_receipt_is_resubmitted_only_after_review(self):

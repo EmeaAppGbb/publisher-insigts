@@ -22,7 +22,7 @@ Keep the canonical homes: `infra/`, `workspace/`, `scenario/data`,
 `scenario/knowledge`, `scenario/workflows`, `scenario/evals`, `agents/<variant>/`
 and `app/`. Do not create competing root tool/evaluation/service trees or
 silently add a backend/channel. A different ontology receives new identities;
-do not turn the sample binder into unrestricted text substitution.
+do not turn the binder into unrestricted text substitution.
 
 ## Produce one complete work package
 

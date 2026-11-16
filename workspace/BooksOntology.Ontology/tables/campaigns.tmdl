@@ -1,0 +1,38 @@
+table campaigns
+	lineageTag: 15b95c54-5f48-453b-b089-bd98c4e907bd
+
+	column campaign_id
+		dataType: string
+		sourceColumn: campaign_id
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column title_name
+		dataType: string
+		sourceColumn: title_name
+
+	column campaign_name
+		dataType: string
+		sourceColumn: campaign_name
+
+	column channel
+		dataType: string
+		sourceColumn: channel
+
+	column territory
+		dataType: string
+		sourceColumn: territory
+
+	column start_date
+		dataType: dateTime
+		sourceColumn: start_date
+
+	column end_date
+		dataType: dateTime
+		sourceColumn: end_date
+
+	column budget_gbp
+		dataType: int64
+		sourceColumn: budget_gbp

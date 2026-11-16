@@ -76,7 +76,7 @@ a question. For the remaining gates in `docs/runtime-integration.md`:
 
 - **Browser sign-in.** The user signs in at the `app` output's URL, asks the sample
   question with IQ, accepts the Fabric IQ consent card once, asks again and gets
-  Pump B at North Works with a `[D1]` marker; then compares with **Ask both** and
+  The Glass Orchard and its forecast variance with a `[D1]` marker; then compares with **Ask both** and
   asks a follow-up. The runner's CLI token does not prove the app's registration,
   its consent or the redirect bridge.
 - **Sources.** Decide from the tool timeline, not answer text: the Fabric IQ call

@@ -1,0 +1,78 @@
+table decision_options
+	lineageTag: b9863e92-64a6-4bca-abda-1d2f055c7689
+
+	column option_id
+		dataType: string
+		sourceColumn: option_id
+
+	column signal_id
+		dataType: string
+		sourceColumn: signal_id
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column title_name
+		dataType: string
+		sourceColumn: title_name
+
+	column edition_id
+		dataType: string
+		sourceColumn: edition_id
+
+	column territory
+		dataType: string
+		sourceColumn: territory
+
+	column option_name
+		dataType: string
+		sourceColumn: option_name
+
+	column is_recommended
+		dataType: string
+		sourceColumn: is_recommended
+
+	column units
+		dataType: int64
+		sourceColumn: units
+
+	column investment_gbp
+		dataType: int64
+		sourceColumn: investment_gbp
+
+	column revenue_protected_gbp
+		dataType: int64
+		sourceColumn: revenue_protected_gbp
+
+	column cost_avoided_gbp
+		dataType: int64
+		sourceColumn: cost_avoided_gbp
+
+	column remaining_risk_gbp
+		dataType: int64
+		sourceColumn: remaining_risk_gbp
+
+	column arrival_days
+		dataType: int64
+		sourceColumn: arrival_days
+
+	column opportunity_at_risk_gbp
+		dataType: int64
+		sourceColumn: opportunity_at_risk_gbp
+
+	column confidence
+		dataType: string
+		sourceColumn: confidence
+
+	column key_assumption
+		dataType: string
+		sourceColumn: key_assumption
+
+	column primary_risk
+		dataType: string
+		sourceColumn: primary_risk
+
+	column as_of_week
+		dataType: dateTime
+		sourceColumn: as_of_week

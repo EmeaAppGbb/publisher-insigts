@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Ontology",
+    "displayName": "BooksOntology",
+    "description": "Titles, editions, campaigns, weekly signals, decision options, title performance and reprint requests. BindBooks connects this definition to the current workspace's Books lakehouse."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "0291970c-8a8b-4481-b30b-ed6a309d2368"
+  }
+}

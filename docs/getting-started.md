@@ -266,22 +266,22 @@ reviewed, published `workspace/` definitions through Fabric's **Bulk Import Item
 Definitions** API and attaches `Bootstrap`. It uses the signed-in Azure user,
 not a PAT, and does not connect Fabric to GitHub.
 
-All five items are included: `Scenario`, `SeedScenario`, `ScenarioOntology`,
-`BindScenario` and `Bootstrap`. The plan deploys the lakehouse, runs the seeder,
-deploys the ontology, then runs its binder. The runner resumes accepted
+All six items are included: `Books`, `SeedBooks`, `ComputeBookSignals`,
+`BooksOntology`, `BindBooks` and `Bootstrap`. The plan deploys the lakehouse, runs
+the seeder and the signal notebook, deploys the ontology, then runs its binder. The runner resumes accepted
 operations, checks every imported item and never overwrites existing definitions.
 If plan attachment is unavailable, it stops for explicit
 `--bootstrap-fallback notebooks` approval before importing and running the
 notebooks separately.
 
-The seeder creates `dbo.demo_sites` (two rows), `dbo.demo_assets` (three rows), and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes. It resolves `Scenario` in the **current workspace**, uses GUID-based OneLake paths, and requires no default lakehouse attachment. Reruns only insert missing demo keys and create the file if absent; they do not overwrite edits, delete other data or touch a legacy `Files/starter.txt`. Run one seeder per workspace at a time. It refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled.
+The seeder creates the fictional book portfolio's tables, such as `dbo.titles` (8 rows) and `dbo.weekly_sales` (26 weeks), and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes; `ComputeBookSignals` then derives the latest week's `dbo.title_signals`, `dbo.decision_options` and `dbo.title_performance` ([data contract](../scenario/data/README.md)). Both resolve `Books` in the **current workspace**, use GUID-based OneLake paths, and require no default lakehouse attachment. Seeder reruns only insert missing demo keys and create the file if absent; they do not overwrite edits or delete other data. Run one seeder per workspace at a time. It refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled.
 
-Run `BindScenario` as an **authorized Fabric user**: service-principal NotebookUtils tokens have restricted scopes. It refreshes the two tables' SQL metadata and binds the Site/Asset ontology to this workspace's lakehouse through its SQL analytics endpoint, with every `ONT_*` source pin; Fabric keeps the pins only in that form, and graph materialization needs them ([binding](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint)). The runner then checks the binding and records the **physical lakehouse and ontology GUIDs**, not the logical IDs in `.platform`. Review the generated DEV binding before promotion. By hand, copy the GUIDs the binder prints and confirm the files/tables and a data-backed ontology query in Fabric before continuing.
+Run `BindBooks` as an **authorized Fabric user**: service-principal NotebookUtils tokens have restricted scopes. It refreshes the seven ontology tables' SQL metadata and binds the books ontology to this workspace's lakehouse through its SQL analytics endpoint, with every `ONT_*` source pin; Fabric keeps the pins only in that form, and graph materialization needs them ([binding](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint)). The runner then checks the binding and records the **physical lakehouse and ontology GUIDs**, not the logical IDs in `.platform`. Review the generated DEV binding before promotion. By hand, copy the GUIDs the binder prints and confirm the files/tables and a data-backed ontology query in Fabric before continuing.
 
 | Case | Flag |
 | --- | --- |
-| The tenant rejects plan attachment (`FeatureNotAvailable`) | `--bootstrap-fallback notebooks` imports without the plan, then runs `SeedScenario` and `BindScenario` in order. Never change a tenant setting instead. |
-| A deployed notebook, ontology or plan differs from the checkout | `--update-definitions`. Review each printed `git diff` command, then approve with `--approve item-update=<sha12>`; `--yes` cannot. Lakehouses are never replaced, and updated bootstrap notebooks run again before the binding is re-verified. |
+| The tenant rejects plan attachment (`FeatureNotAvailable`) | `--bootstrap-fallback notebooks` imports without the plan, then runs `SeedBooks`, `ComputeBookSignals` and `BindBooks` in order. Never change a tenant setting instead. |
+| A deployed notebook, ontology or plan differs from the checkout | `--update-definitions`. Review each printed `git diff` command, then approve with `--approve item-update=<sha12>`; `--yes` cannot. Lakehouses are never replaced, and updated bootstrap notebooks, with the notebooks that read their output, run again before the binding is re-verified. |
 | An import or notebook run failed | Inspect and fix the cause, then rerun with `--retry-failed`. |
 
 ### Optional Git synchronization
@@ -386,14 +386,14 @@ grant. Without a tenant that meets these prerequisites, Work IQ stays unverified
 
 ## 6. Complete knowledge setup
 
-With `WEB_IQ_API_KEY` exported, rerun `up`. The knowledge phase writes `knowledge_lakehouse_id`, the `Scenario` lakehouse's physical GUID, and the `scenario` entry of `knowledge_ontologies`, with `ScenarioOntology`'s physical GUID, into the **same** `terraform.tfvars` with the [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then saves an untargeted plan; approve it with `--approve knowledge=<sha12>`. By hand, set the same two values:
+With `WEB_IQ_API_KEY` exported, rerun `up`. The knowledge phase writes `knowledge_lakehouse_id`, the `Books` lakehouse's physical GUID, and the `scenario` entry of `knowledge_ontologies`, with `BooksOntology`'s physical GUID, into the **same** `terraform.tfvars` with the [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then saves an untargeted plan; approve it with `--approve knowledge=<sha12>`. By hand, set the same two values:
 
 ```hcl
-knowledge_lakehouse_id = "<dev-Scenario-lakehouse-guid>"
+knowledge_lakehouse_id = "<dev-Books-lakehouse-guid>"
 knowledge_ontologies = {
   scenario = {
-    ontology_id = "<dev-ScenarioOntology-guid>"
-    description = "Current sites, assets, their status, and which site each asset belongs to."
+    ontology_id = "<dev-BooksOntology-guid>"
+    description = "Current book performance: titles, editions, campaigns, the latest week's signals and decision options, title performance and reprint requests."
   }
 }
 ```
@@ -428,7 +428,7 @@ Allow time for permission propagation; resolve any ingestion errors before relyi
 The `verify` phase then proves **DEV ready** with your own Search token, never a managed identity:
 
 - Every folder source, attached or not, has ingested its folder.
-- Live ontology retrieval through the check-only knowledge base returns `fabricOntology` activity and references for DEV's workspace and ontology, with **Pump B** and **North Works** in the live source data (or your `--expect` facts). An answer from a document does not count.
+- Live ontology retrieval through the check-only knowledge base returns `fabricOntology` activity and references for DEV's workspace and ontology, with **The Glass Orchard** and **Forecast variance** in the live source data (or your `--expect` facts). An answer from a document does not count.
 - Document retrieval from the agents' knowledge base cites the `documents` source. That base runs at minimal effort, so `verify` sends the question as a search intent.
 - One public-only Web IQ search and one public-context retrieval succeed.
 - With Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection exist; no Work IQ call is made.
@@ -490,8 +490,8 @@ your work account:
 
 1. At first sign-in, consent to the app's access to Microsoft Foundry for you,
    unless an administrator granted it for everyone.
-2. Ask **With IQ**: "Which assets are in maintenance, and at which site?" Expect
-   **Pump B at North Works** from the live ontology, cited `[D1]`. The first Fabric
+2. Ask **With IQ**: "What needs my attention this week?" Expect **The Glass
+   Orchard** and its forecast variance from the live ontology, cited `[D1]`. The first Fabric
    IQ call shows a consent card with Microsoft's link: accept, then ask again.
    Fabric IQ and, with Work IQ, Work IQ each ask once per user; Foundry IQ and Web
    IQ use the project's identity and never ask.

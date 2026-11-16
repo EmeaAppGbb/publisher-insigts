@@ -1,0 +1,124 @@
+/// A modelled response to a signal, with its investment, effect, assumption and risk.
+entity DecisionOption
+	lineageTag: 767a8796-0673-4358-9a8c-7f1afea8c887
+	backingTable: decision_options
+	keyProperty: OptionId
+
+	/// Identifier of the option for its week.
+	property OptionId
+		dataType: string
+		lineageTag: 00a55f93-719b-4613-9156-980dd37dcdaa
+		backingConfiguration
+			valueColumn: decision_options.option_id
+
+	property SignalId
+		dataType: string
+		lineageTag: 221b2ba6-cde1-4c69-8321-88a8e8b96bfa
+		backingConfiguration
+			valueColumn: decision_options.signal_id
+
+	property TitleId
+		dataType: string
+		lineageTag: 0d73d0f1-4dc0-44a1-8267-cc0629f047c6
+		backingConfiguration
+			valueColumn: decision_options.title_id
+
+	property TitleName
+		dataType: string
+		lineageTag: 10ac9728-cec5-423b-a0a3-541ec4402812
+		backingConfiguration
+			valueColumn: decision_options.title_name
+
+	property EditionId
+		dataType: string
+		lineageTag: 696e14ff-0572-470a-b0dc-25c6d9d53ca5
+		backingConfiguration
+			valueColumn: decision_options.edition_id
+
+	property Territory
+		dataType: string
+		lineageTag: 285b8423-a22e-41ec-9623-26f64bd93d8d
+		backingConfiguration
+			valueColumn: decision_options.territory
+
+	property OptionName
+		dataType: string
+		lineageTag: 2a56b7ac-fc4d-4632-b637-1d844c58e73c
+		backingConfiguration
+			valueColumn: decision_options.option_name
+
+	/// Yes for the option the rules recommend.
+	property IsRecommended
+		dataType: string
+		lineageTag: 7be1c46c-ab82-484e-817c-a835f8b442a4
+		backingConfiguration
+			valueColumn: decision_options.is_recommended
+
+	property Units
+		dataType: int64
+		lineageTag: 89c9d0bb-9d07-498c-ad98-064a9a7344d3
+		backingConfiguration
+			valueColumn: decision_options.units
+
+	property InvestmentGbp
+		dataType: int64
+		lineageTag: b9c4cd50-581e-47aa-96bf-426fbf3864bd
+		backingConfiguration
+			valueColumn: decision_options.investment_gbp
+
+	property RevenueProtectedGbp
+		dataType: int64
+		lineageTag: 160815a2-408a-4f95-b9e6-765cc02b2cc3
+		backingConfiguration
+			valueColumn: decision_options.revenue_protected_gbp
+
+	property CostAvoidedGbp
+		dataType: int64
+		lineageTag: 72637ca7-f9f9-4f75-bf6e-b9edbf076eba
+		backingConfiguration
+			valueColumn: decision_options.cost_avoided_gbp
+
+	property RemainingRiskGbp
+		dataType: int64
+		lineageTag: 5d0037f4-0a3d-4497-a956-b43dd2d4abdd
+		backingConfiguration
+			valueColumn: decision_options.remaining_risk_gbp
+
+	/// Days until the option takes effect.
+	property ArrivalDays
+		dataType: int64
+		lineageTag: ea8ae0c4-c2fa-4fb3-9d1a-63a906b5185e
+		backingConfiguration
+			valueColumn: decision_options.arrival_days
+
+	property OpportunityAtRiskGbp
+		dataType: int64
+		lineageTag: 3269518b-fe9d-403a-8eeb-20f44a833c2d
+		backingConfiguration
+			valueColumn: decision_options.opportunity_at_risk_gbp
+
+	property Confidence
+		dataType: string
+		lineageTag: 213be7f8-6707-4932-988c-3873d245286f
+		backingConfiguration
+			valueColumn: decision_options.confidence
+
+	property KeyAssumption
+		dataType: string
+		lineageTag: 74355b95-dfd5-43d9-bf2a-cdb41132b784
+		backingConfiguration
+			valueColumn: decision_options.key_assumption
+
+	property PrimaryRisk
+		dataType: string
+		lineageTag: 209ce153-da5b-4799-b017-bc4390f6ccea
+		backingConfiguration
+			valueColumn: decision_options.primary_risk
+
+	property AsOfWeek
+		dataType: dateTime
+		lineageTag: 9eb6f55c-148d-4b4f-b362-0285deb50667
+		backingConfiguration
+			valueColumn: decision_options.as_of_week
+
+	annotation BootstrapBinding = books-v1

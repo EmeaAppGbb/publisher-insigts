@@ -11,11 +11,12 @@
 
 # MARKDOWN ********************
 
-# # Bind the scenario ontology
-# Run after SeedScenario and ScenarioOntology deploy. This notebook does not seed
-# data or create items. It binds only the sample ontology to its current workspace,
-# through the lakehouse's SQL analytics endpoint with ONT_* source pins on every
-# partition: Fabric keeps the pins in this form, and graph materialization needs them.
+# # Bind the books ontology
+# Run after SeedBooks, ComputeBookSignals and BooksOntology deploy. This notebook
+# does not seed or compute data or create items. It binds only BooksOntology to
+# its current workspace, through the lakehouse's SQL analytics endpoint with ONT_*
+# source pins on every partition: Fabric keeps the pins in this form, and graph
+# materialization needs them.
 # Run as an authorized Fabric user; service-principal NotebookUtils tokens lack
 # the full Fabric scopes needed for these definition/metadata operations.
 # Serialize runs and authoring: updateDefinition replaces the item's definition.
@@ -23,8 +24,8 @@
 
 # PARAMETERS CELL ********************
 
-lakehouse_name = "Scenario"
-ontology_name = "ScenarioOntology"
+lakehouse_name = "Books"
+ontology_name = "BooksOntology"
 timeout_seconds = 900
 
 # METADATA ********************
@@ -56,12 +57,14 @@ workspace_id = str(UUID(notebookutils.runtime.context["currentWorkspaceId"]))
 workspace_name = notebookutils.runtime.context["currentWorkspaceName"]
 deadline = time.monotonic() + timeout_seconds
 api_root = "https://api.fabric.microsoft.com"
-ontology_logical_id = "e6a99499-e3f5-4a9b-8288-3985c73a05e5"
-table_names = ("demo_sites", "demo_assets")
-entity_names = ("Site", "Asset")
-binding_marker = "annotation BootstrapBinding = site-asset-v1"
-expression_name = "ScenarioLakehouse"
-source_lineage_tag = "afcdf5a6-abb9-4722-81d6-c540ac4b4433"
+ontology_logical_id = "0291970c-8a8b-4481-b30b-ed6a309d2368"
+table_names = (
+    "titles", "editions", "campaigns", "title_signals", "decision_options", "title_performance", "reprint_requests",
+)
+entity_names = ("Title", "Edition", "Campaign", "TitleSignal", "DecisionOption", "TitlePerformance", "ReprintRequest")
+binding_marker = "annotation BootstrapBinding = books-v1"
+expression_name = "BooksLakehouse"
+source_lineage_tag = "e6cc1768-4716-4cea-9291-f1284a1a9cd1"
 
 
 def remaining_seconds():
@@ -151,7 +154,7 @@ def get_definition(ontology_id):
         or str(UUID(item["logicalId"])) != ontology_logical_id
         or item["properties"]["generation"] != 2
     ):
-        raise ValueError(f"BindScenario requires the current workspace's new-experience {ontology_name}.")
+        raise ValueError(f"BindBooks requires the current workspace's new-experience {ontology_name}.")
     # The definition export can return a placeholder logical ID; item metadata is authoritative.
     definition = fabric_operation(
         f"/v1/workspaces/{workspace_id}/ontologies/{ontology_id}/getDefinition"
@@ -395,7 +398,7 @@ for result in sync["value"]:
         raise RuntimeError(f"Unexpected SQL metadata refresh result: {result}")
     statuses[name] = result
 if set(statuses) != set(table_names):
-    raise RuntimeError(f"SQL metadata refresh did not report every seeded table: {statuses}")
+    raise RuntimeError(f"SQL metadata refresh did not report every bound table: {statuses}")
 for name, result in statuses.items():
     if result["status"] == "Success" or (
         result["status"] == "NotRun" and result.get("lastSuccessfulSyncDateTime")

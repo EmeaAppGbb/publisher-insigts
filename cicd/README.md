@@ -12,21 +12,22 @@ There is no fabric-cicd dependency or `fab deploy` configuration. The [determini
 
 ## Ownership and included items
 
-Terraform owns the project-specific user-auth registration, capacity, workspaces, permissions, the optional GitHub credentials connection, the DEV/TEST deployment pipeline, Foundry, Search, Web IQ, the agents' connections and the app's hosting. An administrator owns consent; shared Microsoft enterprise applications are read-only lookups, not Terraform-owned assets. The repository owns workspace item definitions, deployed by native import or opt-in Git sync. The seeder inserts only missing demo keys and initial starter content. Do not also manage these item definitions with Terraform.
+Terraform owns the project-specific user-auth registration, capacity, workspaces, permissions, the optional GitHub credentials connection, the DEV/TEST deployment pipeline, Foundry, Search, Web IQ, the agents' connections and the app's hosting. An administrator owns consent; shared Microsoft enterprise applications are read-only lookups, not Terraform-owned assets. The repository owns workspace item definitions, deployed by native import or opt-in Git sync. The seeder inserts only missing demo keys and initial starter content; the signal notebook replaces only its derived tables. Do not also manage these item definitions with Terraform.
 
 | Git item | Purpose |
 | --- | --- |
-| [`Scenario.Lakehouse`](../workspace/Scenario.Lakehouse) | Schema-enabled lakehouse with default schema `dbo`; Git does not contain its data. |
-| [`SeedScenario.Notebook`](../workspace/SeedScenario.Notebook/notebook-content.py) | Synthetic sites/assets and a starter document in the `documents` knowledge folder, embedded in code so they travel through Git and native promotion. |
-| [`ScenarioOntology.Ontology`](../workspace/ScenarioOntology.Ontology) | New-experience TMDL Site/Asset entities and their LocatedAt relationship, initially without environment-specific partitions. |
-| [`BindScenario.Notebook`](../workspace/BindScenario.Notebook/notebook-content.py) | Wait for scoped SQL metadata refresh and bind the sample ontology to the current workspace's lakehouse through its SQL analytics endpoint, with every `ONT_*` source pin. |
-| [`Bootstrap.DeploymentPlan`](../workspace/Bootstrap.DeploymentPlan/plan.yml) | Deploy the lakehouse, run the seed notebook, deploy the ontology, then run its binding notebook. |
+| [`Books.Lakehouse`](../workspace/Books.Lakehouse) | Schema-enabled lakehouse with default schema `dbo`; Git does not contain its data. |
+| [`SeedBooks.Notebook`](../workspace/SeedBooks.Notebook/notebook-content.py) | A deterministic generator for the fictional book portfolio and a starter document in the `documents` knowledge folder, embedded in code so they travel through Git and native promotion. |
+| [`ComputeBookSignals.Notebook`](../workspace/ComputeBookSignals.Notebook/notebook-content.py) | The fixed rules that derive the latest week's title signals, decision options and title performance from the seeded tables. |
+| [`BooksOntology.Ontology`](../workspace/BooksOntology.Ontology) | New-experience TMDL book entities and their relationships, initially without environment-specific partitions. |
+| [`BindBooks.Notebook`](../workspace/BindBooks.Notebook/notebook-content.py) | Wait for scoped SQL metadata refresh and bind BooksOntology to the current workspace's lakehouse through its SQL analytics endpoint, with every `ONT_*` source pin. |
+| [`Bootstrap.DeploymentPlan`](../workspace/Bootstrap.DeploymentPlan/plan.yml) | Deploy the lakehouse, run the seed and signal notebooks, deploy the ontology, then run its binding notebook. |
 
-The generic item names are local to each project's workspaces. Preserve each `.platform` logical ID across environments. If you rename `Scenario` or `ScenarioOntology`, update notebook parameters and plan actions together. The plan uses logical IDs, while Terraform's `knowledge_lakehouse_id` and `knowledge_ontologies` inputs require physical DEV item GUIDs.
+The generic item names are local to each project's workspaces. Preserve each `.platform` logical ID across environments. If you rename `Books` or `BooksOntology`, update notebook parameters and plan actions together. The plan uses logical IDs, while Terraform's `knowledge_lakehouse_id` and `knowledge_ontologies` inputs require physical DEV item GUIDs.
 
 Keep notebook defaults in executable `# PARAMETERS CELL` sections. This delimiter preserves the parameter-cell role through Fabric Git; a `tags` entry in the language metadata does not. A `# PARAMETERS` heading alone is not a code-cell delimiter and can cause Fabric to import the defaults as Markdown.
 
-The seeder uses the current runtime workspace, never a saved DEV workspace ID or default lakehouse attachment. It writes `Tables/dbo/demo_sites`, `Tables/dbo/demo_assets` and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes. Existing rows (including edited demo rows) and the existing file are retained, and a legacy `Files/starter.txt` is left untouched. Incompatible table schemas/non-Delta paths and write failures stop the run; no data is silently replaced. Serialize seed runs per workspace.
+The seeder uses the current runtime workspace, never a saved DEV workspace ID or default lakehouse attachment. It writes the [book portfolio's raw tables](../scenario/data/README.md) under `Tables/dbo` and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes. Existing rows (including edited demo rows) and the existing file are retained. `ComputeBookSignals` then replaces only its three derived tables, from the same workspace's raw tables. Incompatible table schemas/non-Delta paths and write failures stop the run; no data is silently replaced. Serialize seed runs per workspace.
 
 ## Initial native bootstrap
 
@@ -84,23 +85,23 @@ A no-op Git update is not a reliable reseed trigger. Run the notebook separately
 
 ## Running only the seeder
 
-Open `SeedScenario` and run all cells, or invoke it through the [notebook Job Scheduler APIs](https://learn.microsoft.com/fabric/data-engineering/notebook-public-api). Resolve the notebook's physical item ID in the target workspace; poll the job to completion and surface its failure reason. This path doesn't require a new commit or a deployment plan.
+Open `SeedBooks` and run all cells, or invoke it through the [notebook Job Scheduler APIs](https://learn.microsoft.com/fabric/data-engineering/notebook-public-api). Resolve the notebook's physical item ID in the target workspace; poll the job to completion and surface its failure reason. This path doesn't require a new commit or a deployment plan. Run `ComputeBookSignals` after it, the same way, so the derived tables describe the latest week; a later `through_week`, such as `27`, adds that week's rows and advances the demo by a week.
 
-The parameter defaults target `Scenario` and allow only workspace names ending in `-dev` or `-test`. This is a demo-data guard, not an authorization boundary. For a deliberate exception, supply the Boolean `allow_other_workspaces=true` for that run; never a truthy string. The included plan explicitly passes `false`.
+The parameter defaults target `Books` and allow only workspace names ending in `-dev` or `-test`. This is a demo-data guard, not an authorization boundary. For a deliberate exception, supply the Boolean `allow_other_workspaces=true` for that run; never a truthy string. The included plan explicitly passes `false`.
 
 Seed code is bootstrap, not continuous data synchronization: changing an existing fixture in Git doesn't overwrite the corresponding existing row or file. Add reviewed data migrations/ingestion to your derived project when updates are needed.
 
 ## Adding ontologies, graphs and semantic models
 
-The template supplies a complete **Site/Asset ontology example**, its seed data and target-binding action. It does not include a separate graph or Power BI semantic model. Author additional items in DEV, then commit their real Fabric-exported definitions and `.platform` files through Git. Register additional DEV ontologies with the knowledge base using `knowledge_ontologies`; see [the ontology guide](../docs/ontology-knowledge.md).
+The repository supplies a complete **book portfolio ontology**, its seed data, signal rules and target-binding action. It does not include a separate graph or Power BI semantic model. Author additional items in DEV, then commit their real Fabric-exported definitions and `.platform` files through Git. Register additional DEV ontologies with the knowledge base using `knowledge_ontologies`; see [the ontology guide](../docs/ontology-knowledge.md).
 
-The sample relationship is `demo_assets.site_id -> demo_sites.site_id`. It can back Site/Asset ontology entities, graph nodes and located-at edges, or a semantic model counting assets by site/status.
+Its relationships, such as `editions.title_id -> titles.title_id` and `decision_options.signal_id -> title_signals.signal_id`, can back ontology entities, graph nodes and edges, or a semantic model of sales by title, territory and channel.
 
-Add each new item as a deployment group in `Bootstrap` (or an appropriately named release plan) with its real prerequisites. Use `SeedScenario` for raw Delta data, or **BindScenario** for consumers that require the sample's SQL metadata or bound ontology. Supply a separate explicit binding action for a different ontology schema. A dependency covers the whole group, including its post-actions; file order alone is not ordering. Commit the changed plan with the items it references and select those items in the operation.
+Add each new item as a deployment group in `Bootstrap` (or an appropriately named release plan) with its real prerequisites. Use `SeedBooks` for raw Delta data, `ComputeBookSignals` for the derived tables, or **BindBooks** for consumers that require the books' SQL metadata or bound ontology. Supply a separate explicit binding action for a different ontology schema. A dependency covers the whole group, including its post-actions; file order alone is not ordering. Commit the changed plan with the items it references and select those items in the operation.
 
 | Item | Additional work beyond deploying its definition |
 | --- | --- |
-| Ontology (preview) | The sample's binder configures its target lakehouse. For additional ontologies, provide their own target-specific bindings; if generated from a semantic model, order them after that model. |
+| Ontology (preview) | BindBooks configures its target lakehouse. For additional ontologies, provide their own target-specific bindings; if generated from a semantic model, order them after that model. |
 | Graph model/query set | Map node/edge sources to target tables and arrange loading/refresh. [API-created graph models currently require a first portal open](https://learn.microsoft.com/fabric/graph/manage-data) to initialize loading infrastructure; do not assume definition import alone makes them queryable. |
 | Semantic model | Set target data-source/connection parameters and arrange refresh or Direct Lake framing as applicable. Workspace-specific SQL endpoint URLs and database IDs don't automatically rebind through Git. |
 
@@ -108,7 +109,7 @@ Review [cross-workspace dependency binding](https://learn.microsoft.com/fabric/c
 
 Only [supported executable items](https://learn.microsoft.com/fabric/cicd/deployment-plan/deployment-plan-actions#item-types-you-can-run-as-an-action) can be plan actions: notebooks, data pipelines, Dataflow Gen2, copy jobs and user data functions. Ontologies, graphs and semantic models can be deployed as groups; they are not generic `Execute` actions. A refresh step can instead run a supported data pipeline/notebook using the target item's documented API and permissions.
 
-An action finishes when its own run finishes, not when downstream services catch up. The seeder completes Delta writes; `BindScenario` explicitly refreshes and checks SQL metadata for **only the two sample tables**. Neither notebook loads a graph or refreshes a separate semantic model. Add bounded readiness/refresh actions for other consumers and fail on timeout; do not substitute an arbitrary sleep.
+An action finishes when its own run finishes, not when downstream services catch up. The seeder and the signal notebook complete Delta writes; `BindBooks` explicitly refreshes and checks SQL metadata for **only the seven ontology tables**. Neither notebook loads a graph or refreshes a separate semantic model. Add bounded readiness/refresh actions for other consumers and fail on timeout; do not substitute an arbitrary sleep.
 
 Prefer small synthetic fixtures embedded in notebook code or an authenticated data source. Notebook `Resources/builtin/` files can be [tracked by Git](https://learn.microsoft.com/fabric/data-engineering/notebook-source-control-deployment#notebooks-resources-folder-support-in-git), but deployment-pipeline/public-API support is currently limited; the starter doesn't depend on this feature.
 
