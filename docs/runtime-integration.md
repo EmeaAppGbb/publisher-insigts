@@ -4,9 +4,8 @@ The [web app](../app/README.md), a React page with a small Node.js server on Azu
 Container Apps, signs each user in and forwards their own Foundry token to two
 Foundry prompt agents: the [variants of one agent](../agents/README.md), with IQ
 and without. The with-IQ agent reaches the four IQs through one MCP tool each:
-Fabric IQ for live ontology facts, Foundry IQ for approved documents, Web IQ for
-public context through a Foundry IQ knowledge base of its own and, opt-in, Work IQ
-for the user's own mail. This page holds the route's contract, its identities, its
+Fabric IQ for live ontology facts, Foundry IQ for approved documents, Web IQ's own
+MCP server for public context and, opt-in, Work IQ for the user's own mail. This page holds the route's contract, its identities, its
 failures and the evidence for a ready shell.
 [Getting started step 7](getting-started.md#7-create-the-agents-and-app) creates it
 and the [runtime-integration skill](../.github/skills/runtime-integration/SKILL.md)
@@ -35,9 +34,9 @@ signed-in user's, so Foundry's role-based access applies to them. Fabric IQ
 exchanges the user's token for its own audience, so Fabric workspace roles apply to
 that user. With Work IQ, Foundry's `work-iq` connection calls Work IQ with the token
 it keeps for that user since their one-time consent, so mailbox permissions apply.
-The agents read both knowledge bases as the project's managed identity, and Foundry
-Agent Service calls Web IQ for the public-context source as that identity too, through
-its `web-iq` connection, keyless. This is the intended authorization contract,
+The agents read the documents knowledge base as the project's managed identity, and
+Foundry Agent Service calls Web IQ as that identity too, through the `web-iq`
+connection, keyless. This is the intended authorization contract,
 not evidence that every user or deployment has passed the checks below.
 
 [Editable Excalidraw source](diagrams/agent-runtime.excalidraw) | [All diagrams](diagrams/README.md) | [Icon sources](diagram-authoring.md#official-icon-sources)
@@ -50,8 +49,8 @@ six-character suffix once per deployment.
 | Component | Owner | Contract |
 | --- | --- | --- |
 | Agents `<project_name>-with-iq` and `<project_name>-without-iq` | Runner, `agent` phase | Versions of the reviewed definitions in [`agents/`](../agents/README.md) on the `agent` model deployment; each latest version's metadata holds the rendered body's `definition_sha256`. |
-| Project connections | Terraform, [`infra/foundry.tf`](../infra/foundry.tf) | `fabric-scenario` (`UserEntraToken`), `knowledge-base`, `public-context` and `web-iq` (`ProjectManagedIdentity`), `work-iq` (`OAuth2`, only with Work IQ), `app-insights` for Foundry's tracing and `knowledge-search`. Each is declared with `isSharedToAll = false`, as Foundry stores them. |
-| Knowledge bases | Terraform, [`infra/knowledge.tf`](../infra/knowledge.tf), [`infra/web_iq.tf`](../infra/web_iq.tf) | `<project_name>-knowledge` for documents, `<project_name>-public-context` for Web IQ, and the check-only `<project_name>-ontology-check` that only `verify` queries ([ontology and knowledge](ontology-knowledge.md#two-retrieval-paths)). |
+| Project connections | Terraform, [`infra/foundry.tf`](../infra/foundry.tf) | `fabric-scenario` (`UserEntraToken`), `knowledge-base` and `web-iq` (`ProjectManagedIdentity`), `work-iq` (`OAuth2`, only with Work IQ), `app-insights` for Foundry's tracing and `knowledge-search`. Each is declared with `isSharedToAll = false`, as Foundry stores them. |
+| Knowledge bases | Terraform, [`infra/knowledge.tf`](../infra/knowledge.tf) | `<project_name>-knowledge` for documents and the check-only `<project_name>-ontology-check` that only `verify` queries ([ontology and knowledge](ontology-knowledge.md#two-retrieval-paths)). |
 | Container registry `cr<project_name without hyphens><suffix>` | Terraform, [`infra/app.tf`](../infra/app.tf) | Holds the `app` image. The admin user is disabled, and `container_registry_sku` defaults to `Basic`. |
 | Log Analytics `log-<prefix>`, Application Insights `appi-<prefix>` | Terraform, [`infra/monitoring.tf`](../infra/monitoring.tf) | The container's logs and the traces of the app and the agents. Application Insights accepts Entra ID only; see [traces and telemetry](#traces-and-telemetry). |
 | Container Apps environment `cae-<prefix>` | Terraform | Consumption workload profile; logs go to the Log Analytics workspace. |
@@ -77,7 +76,7 @@ at start, and an invalid or incomplete configuration stops the container.
 | App server -> Foundry | `POST <project endpoint>/openai/v1/responses` with `agent_reference` to the variant's agent, the question as `input`, `previous_response_id` for a follow-up, the metadata `cid` and `variant`, and `stream: true` | The same token, forwarded |
 | With IQ -> Fabric IQ | MCP `ask_ontology` on `BooksOntology`'s endpoint, connection `fabric-scenario` | `UserEntraToken`: the user's token, exchanged for Fabric |
 | With IQ -> Foundry IQ | MCP `knowledge_base_retrieve` on `<project_name>-knowledge`, connection `knowledge-base` | `ProjectManagedIdentity`, with Search Index Data Reader |
-| With IQ -> Web IQ public context | MCP `knowledge_base_retrieve` on `<project_name>-public-context`, connection `public-context` | `ProjectManagedIdentity`; Agent Service calls Web IQ for the source through the `web-iq` connection, as the project identity |
+| With IQ -> Web IQ public context | MCP `web` on Web IQ's MCP server, `https://api.microsoft.ai/v3/mcp`, connection `web-iq` | `ProjectManagedIdentity`: the project identity, bound to the account's AppID |
 | With IQ -> Work IQ mail, only with Work IQ | MCP `fetch` on `https://workiq.svc.cloud.microsoft/mcp`, connection `work-iq` | `OAuth2` identity passthrough: the Work IQ token Foundry keeps for each user after their consent |
 
 The protocol lives in [`app/src/live/protocol.ts`](../app/src/live/protocol.ts), the
@@ -185,7 +184,7 @@ python3 .github/skills/deploy-platform/scripts/foundry_agent.py render \
 | --- | --- | --- | --- | --- |
 | `FabricIQOntology.json` | `fabric_iq_ontology` | `ask_ontology` | `BooksOntology` | `fabric-scenario`, as the user |
 | `FoundryIQKnowledge.json` | `foundry_iq_knowledge` | `knowledge_base_retrieve` | `<project_name>-knowledge` | `knowledge-base`, as the project |
-| `WebIQPublicContext.json` | `web_iq_public_context` | `knowledge_base_retrieve` | `<project_name>-public-context` | `public-context`, as the project |
+| `WebIQPublicContext.json` | `web_iq_public_context` | `web` | Web IQ's MCP server, passage content | `web-iq`, as the project |
 | `WorkIQMail.json` | `work_iq_mail` | `fetch` | Work IQ's MCP server: the user's own mail | `work-iq`, as the user; only with `work_iq_enabled` |
 
 Each tool's `server_description`, at most 1,024 characters, carries what is
@@ -248,11 +247,11 @@ server, `https://workiq.svc.cloud.microsoft/mcp`, through the project connection
 
 ### The reply format
 
-Foundry IQ and Web IQ both offer `knowledge_base_retrieve`, so their server labels,
-descriptions and the instructions keep document questions off the web: Web IQ is
-called last, in public terms, for at most one labelled line. Foundry's runtime
-hands knowledge-base results to the model as documents and invites its own
-`【1:2†source】` citations; the instructions allow only the
+Foundry IQ's `knowledge_base_retrieve` and Web IQ's `web` are separate tools, and
+their server labels, descriptions and the instructions keep document questions off
+the web: Web IQ is called last, in public terms, for at most one labelled line.
+Foundry's runtime hands Foundry IQ's knowledge-base results to the model as
+documents and invites its own `【1:2†source】` citations; the instructions allow only the
 [reply format's](architecture.md#reply-format) markers. A large tool result can
 make the model drop the format; the app's parser then shows the whole reply as the
 answer.
@@ -268,38 +267,36 @@ lacks its embedded schema, so only this resource disables local schema validatio
 ARM still validates requests. Portal onboarding and binding the project identity to
 the AppID are manual ([getting started](getting-started.md#web-iq)).
 
-After knowledge setup, Terraform adds the knowledge source `<project_name>-web`
-(kind `mcpServer` on `https://api.microsoft.ai/v3/mcp`, only the `web` tool,
-`foundryConnection` authentication naming the `web-iq` connection) as the only
-source of the knowledge base `<project_name>-public-context`. The
-`WebIQPublicContext` tool queries that knowledge base, so no document question can
-trigger a web search. The base's retrieval instructions request passage content,
-the only format the account allows.
+After knowledge setup, Terraform adds the project connection `web-iq` to Web IQ's
+MCP server, `https://api.microsoft.ai/v3/mcp`. The `WebIQPublicContext` tool calls it
+directly, allowing only the `web` search, and is a separate tool from the documents
+knowledge base, so no document question can trigger a web search.
 
 - **Keyless identity.** The `web-iq` connection is a `RemoteTool` connection of type
-  `ProjectManagedIdentity` with the audience `https://api.microsoft.ai`. When an
-  agent's tool queries the public-context base, Agent Service resolves it and Web IQ
+  `ProjectManagedIdentity` with the audience `https://api.microsoft.ai`, so Web IQ
   receives a token for the project's managed identity; no key or header is stored
   anywhere. Web IQ has no Azure RBAC: it accepts the identity only once an operator
   binds its application (client) ID, the `web_iq` output's `client_id`, to the
-  account's AppID, and returns HTTP 401 until then. Only Agent Service resolves the
-  connection, so a direct retrieval from the base, the runner's or a portal test's,
-  can't authenticate. A recreated Foundry project has a new identity to bind.
-  Search fixes a source's authentication at creation, so changing it recreates the
-  source and its knowledge base.
+  account's AppID. Only Agent Service can use the identity, so neither the runner
+  nor a person can call Web IQ as it. A recreated Foundry project has a new
+  identity to bind.
+- **Passage content.** The AppID's profile is passage-only: a `web` call with
+  `contentFormat` `markdown`, `text` or `html` fails, so the tool description asks
+  for `passage`, at most 3 results and `maxLength` 1500. Web IQ caps `maxLength` at
+  3000 for such a profile.
 - **Public-only queries.** The identity is the project's, not the user's, so only
-  instructions keep private data out: the tool description and the base's retrieval
+  instructions keep private data out: the tool description and the agent's
   instructions allow public, general context, such as a manufacturer's guidance
   about a type of equipment, and never a site, asset or person's name. The agent
   labels the line "Public context, not company guidance". Check the query in the
   app's tool timeline when you test.
 - **Verification.** `verify` makes no Web IQ call. It checks the account, that the
-  source authenticates through the `web-iq` connection with no stored key, and your
-  `--web-iq-bound` confirmation for the project identity's client ID, which it
-  records and asks for again when that ID changes. It can't read the binding, so
-  Web IQ retrieval stays unverified until the agent's cited public-context line in
-  the app. Missing terms block deployment; missing account outputs or a keyed source
-  block `verify`.
+  `web-iq` connection targets Web IQ's MCP server as the project identity with no
+  key, and your `--web-iq-bound` confirmation for the project identity's client ID,
+  which it records and asks for again when that ID changes. It can't read the
+  binding, so Web IQ retrieval stays unverified until the agent's cited
+  public-context line in the app. Missing terms block deployment; missing outputs or
+  a connection that isn't the project identity's block `verify`.
 
 Do not create credentials on the Fabric deployment application or the app's sign-in
 registration, reuse a delegated-user token, or add a Web IQ key, a backend or
@@ -359,7 +356,7 @@ group, so teardown isn't blocked.
 | --- | --- | --- |
 | Each app user | A Foundry role on the project that lets them run its agents through the Responses API, such as **Foundry User**. Read access to the DEV ontology and its bound data, because Fabric IQ queries run as them. With Work IQ, a mailbox and spending-policy coverage. | An operator. The template assigns no end-user roles. |
 | Deployer | Foundry User on the Foundry account, to publish and invoke the agents; Search Index Data Reader, for `verify`; Privileged Monitoring Data Reader, for trace content; and the subscription and Entra rights in [getting started](getting-started.md#prerequisites). | Terraform (`deployer_foundry_user`, `deployer_search_reader`, `deployer_telemetry_content_reader`); the rest is yours. |
-| Project managed identity | Search Index Data Reader, for both knowledge bases; Monitoring Metrics Publisher, for Foundry's traces. | Terraform |
+| Project managed identity | Search Index Data Reader, for the agents' knowledge base; Monitoring Metrics Publisher, for Foundry's traces. | Terraform |
 | App identity | `AcrPull` on the registry and Monitoring Metrics Publisher on Application Insights only: no Foundry, Search or Fabric access. | Terraform |
 | Search managed identity | Contributor on DEV, for OneLake indexing; Cognitive Services User on the Foundry account, for the models. | Terraform, through the knowledge plan |
 
@@ -522,7 +519,7 @@ token checks or recreate an agent to hide a failure.
 | Bootstrap stops with `CapacityNotActive`; in the app, every with-IQ turn fails within seconds with "A user error occurred while executing a tool call" (`tool_user_error`) while the without-IQ agent answers | The Fabric capacity is paused | Resume the capacity in the Azure portal, then ask again. Pause it again when idle. |
 | Retrieval fails with HTTP 500 "exceeded the maximum runtime" right after a resume | A cold start | Retry; warm up with one question before you rely on the app. |
 | Graph materialization reports *Unsupported Data Source* for every entity | The ontology is bound through a OneLake (`AzureStorage.DataLake`) expression, which loses the `ONT_*` pins | Rerun `BindBooks` (`deploy.py up` reruns it while the binding is unverified): the binding must use the [SQL endpoint form](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint). |
-| The Web IQ tool fails with HTTP 401, 400 or 403 | 401: the project identity's client ID isn't bound to an AppID, or the binding hasn't applied yet, for example after the project was recreated. 400: it is bound to several AppIDs, and the source names none. 403: its AppID isn't allowed Web Search | Bind the `web_iq` output's `client_id` to exactly the account's AppID, with Web Search allowed, in the Web IQ portal, wait a minute and ask again; rerun `up` with `--web-iq-bound <client-id>` if `verify` asks. |
+| The Web IQ tool fails with "A user error occurred while executing a tool call" (`tool_user_error`), which hides Web IQ's status | The call asked for a `contentFormat` other than `passage`; or the project identity's client ID isn't bound to the account's AppID, or the binding hasn't applied yet, for example after the project was recreated; or it is bound to several AppIDs; or the AppID isn't allowed Web Search | Read the call's arguments in the app's tool timeline, or the stored response (`GET <project endpoint>/openai/v1/responses/<id>`): `contentFormat` must be `passage`. Otherwise bind the `web_iq` output's `client_id` to exactly the account's AppID, with Web Search allowed, wait a minute and ask again; rerun `up` with `--web-iq-bound <client-id>` if `verify` asks. |
 | Web IQ returns HTTP 429 | The AppID's rate limit, shared by its keys and bound identities | Wait, or ask Web IQ support to raise the AppID's limit. |
 | Sign-in fails with `AADSTS50011` | The page's address isn't a registered redirect URI, such as `localhost` without `app_local_redirect_uris`, a Codespaces URL or a custom domain | Use the `app` output's `url`, or register `http://localhost:3000/redirect.html` through `app_local_redirect_uris`. |
 | Sign-in fails with msal.js `timed_out`, or silent renewal fails after a day | The redirect bridge isn't the registered redirect URI, or the bridge can't be framed | Register exactly `https://<app>/redirect.html` (Terraform does) and keep the server's `frame-ancestors 'self'` on `/redirect.html`. |
@@ -530,7 +527,7 @@ token checks or recreate an agent to hide a failure.
 | The app says to sign in again (HTTP 401 from the app server) | The token expired, or isn't a Foundry token for this app | Reload the page; MSAL signs in again. |
 | Foundry refused the question (HTTP 403) | The user has no Foundry role on the project | An operator grants one from the [access model](#access-model); allow a few minutes. |
 | Foundry has no agent (HTTP 404) | The agent phase hasn't run, or the settings name another project | Rerun `deploy.py up`; compare `terraform output app_settings` with the container app's settings. |
-| HTTP 429 from the agent model | The `agent` deployment's quota is exhausted | Raise `agent_model.capacity` within your quota; for Web IQ calls or `verify`'s ontology check, `chat_model.capacity`. |
+| HTTP 429 from the agent model | The `agent` deployment's quota is exhausted | Raise `agent_model.capacity` within your quota; for `verify`'s ontology check, `chat_model.capacity`. |
 | A tool shows `tools/list` failed | The definition's `allowed_tools` names a tool the server doesn't offer | Fix the definition to the server's tool names and republish; never widen `allowed_tools`. |
 | Fabric IQ returns an empty reply, or "Invalid JSON response from remote MCP server", after 60–80 seconds | The question spans several entities or is too wide | Ask about one entity, name the properties you need and quote each value. |
 | The app shows a consent card on every question | The user didn't finish consenting, or tenant policy blocks user consent | Open the link, consent as yourself and ask again; otherwise an administrator grants it ([consent for a tool](#consent-for-a-tool)). Never consent for another user. |
@@ -554,11 +551,12 @@ environment, and keep this one until a replacement passes every gate.
 
 | Route | Status | Re-test when |
 | --- | --- | --- |
-| Foundry IQ and Web IQ knowledge bases as the user | Not available: Foundry's MCP connection to a knowledge base uses the project identity | Foundry documents a per-user connection for knowledge-base MCP endpoints |
+| The Foundry IQ knowledge base and Web IQ as the user | Not available: Foundry's MCP connection to a knowledge base uses the project identity, and Web IQ accepts only app-only tokens or keys | Foundry documents a per-user connection for knowledge-base MCP endpoints |
 | The agents' knowledge base with the live `fabricOntology` source | Not chosen: the agents' MCP connection can't send the per-request user header the source needs, so live facts come from native Fabric IQ, and only `verify` queries the check-only base | The connection can pass each user's Search-audience token |
 | Microsoft 365 Mail MCP (`mcp_MailTools`) with `UserEntraToken` | Blocked: Foundry's token exchange for it failed with "ARA OBO token request failed with status BadRequest" | Foundry's exchange works for that server |
 | The Work IQ MCP server with `UserEntraToken` or `AgentOnBehalfOfUser` | Not chosen: `UserEntraToken` isn't supported for this server, and `AgentOnBehalfOfUser`, in preview, needs agent-blueprint authorization that would change the app's sign-in | Microsoft supports `UserEntraToken` for it, or a reviewed sign-in change |
-| Web IQ with an API key, or as a source of the agents' document knowledge base | Not chosen: a key is a long-lived secret to store and rotate, and any document question could trigger a web search | A client other than Foundry Agent Service must query the public-context base |
+| Web IQ as the only source of a public-context knowledge base: a Search `mcpServer` source with `foundryConnection` authentication naming `web-iq` | Blocked: queried by an agent through a knowledge-base connection, every call failed within a second with `tool_user_error`, without detail, while the same connection worked directly (17 November 2026) | Search documents how Agent Service resolves a source's Foundry connection, and an agent's call succeeds |
+| Web IQ with an API key, or as a source of the agents' document knowledge base | Not chosen: a key is a long-lived secret to store and rotate, and any document question could trigger a web search | A caller other than Foundry Agent Service must query Web IQ |
 
 ## Product contracts
 

@@ -18,9 +18,9 @@ app_image_tag = null
 # Web IQ is deployed with every platform. Set true only after accepting its terms.
 # Read preparation.md: paid subscription, public global service,
 # preview terms and manual portal onboarding. The with-IQ agent's Web IQ tool
-# reads public context through its own knowledge base, keyless: Foundry calls Web IQ
-# as the project identity, once you bind that identity's client ID (the web_iq
-# output's client_id, after knowledge setup) to the account's AppID in the Web IQ portal.
+# calls Web IQ's MCP server for public context, keyless: Foundry calls it as the
+# project identity, once you bind that identity's client ID (the web_iq output's
+# client_id, after knowledge setup) to the account's AppID in the Web IQ portal.
 web_iq_terms_accepted = false
 
 # Work IQ, the with-IQ agent's mail tool, reads each user's own mail as that user. Set true only
@@ -34,8 +34,8 @@ work_iq_enabled = false
 # Performance profile: the defaults favour demo speed. The agents run on their own agent
 # deployment (agent_model) at low agent_reasoning_effort, the agents' knowledge base retrieves
 # at minimal effort with extractive output, and the app keeps one warm replica. Fabric IQ
-# queries run on the Fabric capacity (fabric_capacity_sku); Web IQ public-context calls plan
-# and synthesize on chat_model, so raise chat_model's capacity if they return HTTP 429.
+# queries run on the Fabric capacity (fabric_capacity_sku); verify's ontology check plans
+# and synthesizes on chat_model, so raise chat_model's capacity if it returns HTTP 429.
 # GlobalStandard model deployments bill per token, so unused model capacity costs nothing.
 # For lower cost, set app = { min_replicas = 0 } between sessions (the first question then
 # waits for a cold start), keep a smaller Fabric capacity and pause it when idle.

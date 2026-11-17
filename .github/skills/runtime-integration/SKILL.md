@@ -97,8 +97,8 @@ a question. For the remaining gates in `docs/runtime-integration.md`:
 Keep the identity contract intact while proving it. The app's server verifies and
 forwards only the signed-in user's Foundry token; Fabric IQ uses its
 `UserEntraToken` connection and Work IQ its OAuth identity passthrough; the
-knowledge-base tools read documents and public context with the project's managed
-identity. Never expose tokens in prompts, tool arguments, configuration, evidence
+Foundry IQ tool reads documents and the Web IQ tool calls Web IQ's MCP server
+through the `web-iq` connection, both with the project's managed identity. Never expose tokens in prompts, tool arguments, configuration, evidence
 or logs. Never switch to a shared, application or managed identity, widen a role,
 an allow-list or connection sharing, or add a backend to get a plausible answer.
 

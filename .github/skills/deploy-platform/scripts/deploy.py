@@ -123,6 +123,9 @@ VARIABLES = ("project_name", "location", "fabric_location", "search_location", "
              "app_image_tag", "web_iq_terms_accepted", "work_iq_enabled")
 WEB_IQ_API_VERSION = "2026-06-01-preview"
 WEB_IQ_PORTAL = "https://webiq.microsoft.ai/profiles"
+# The audience of the project identity's token for Web IQ, and the API version of the Foundry connection that holds it.
+WEB_IQ_AUDIENCE = "https://api.microsoft.ai"
+FOUNDRY_CONNECTION_API_VERSION = "2025-10-01-preview"
 SEARCH_OFFERINGS = f"{ARM_API}/providers/Microsoft.Search/fetchOfferings?api-version=2026-09-01-preview"
 SEARCH_SERVICE_PATH = re.compile(r"/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Search/searchServices/[^/]+",
                                  re.IGNORECASE)
@@ -2620,9 +2623,7 @@ def knowledge_url(endpoint, collection, name, action, version):
     return f"{path}?api-version={urllib.parse.quote(version, safe='')}"
 
 
-def search_call(ctx, method, url, body=None, *, user_header=False, attempts=1):
-    """One Search data-plane call as the signed-in user. By default it is sent once: its callers poll or retry
-    within their own budgets; attempts=None gives a single read the transport's own retries."""
+def search_call(ctx, method, url, body=None, *, user_header=False):
     token = access_token(ctx, resource=SEARCH_RESOURCE)
     if not token:
         raise Waiting("Azure CLI could not get a Search token for the signed-in user.", "Sign in again, then rerun.")
@@ -2631,7 +2632,8 @@ def search_call(ctx, method, url, body=None, *, user_header=False, attempts=1):
         # The same delegated user token authenticates Search and the live Fabric source.
         headers["x-ms-query-source-authorization"] = token
     try:
-        return ctx.http.request(method, url, headers=headers, body=body, timeout=150, attempts=attempts)
+        # Its callers poll or retry within their own budgets.
+        return ctx.http.request(method, url, headers=headers, body=body, timeout=150, attempts=1)
     except TransportError:
         return Response(599)
 
@@ -2763,13 +2765,13 @@ def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intent
                   "Never accept a document-only answer as live ontology evidence.")
 
 
-def verify_web_iq(ctx, endpoint, version):
-    """Web IQ's keyless route, without a billable call: the account, the public-context source's authentication
-    through the web-iq connection, and the operator's confirmation that the Foundry project identity's application
-    (client) ID is bound to the account's AppID.
+def verify_web_iq(ctx):
+    """Web IQ's keyless route, without a billable call: the account, the web-iq connection through which the agents'
+    Web IQ tool calls Web IQ's MCP server as the Foundry project identity, and the operator's confirmation that the
+    identity's application (client) ID is bound to the account's AppID.
 
-    Only Agent Service resolves that connection, so no direct retrieval, the runner's included, reaches Web IQ through
-    the source: the agent's cited public-context line in the app is the first proof that Web IQ answers.
+    Only Agent Service can use the project identity, so the runner can't call Web IQ as it: the agent's cited
+    public-context line in the app is the first proof that Web IQ answers.
     """
     account, = required_outputs(ctx, "web_iq")
     resource_id = account.get("resource_id") if isinstance(account, dict) else None
@@ -2800,29 +2802,29 @@ def verify_web_iq(ctx, endpoint, version):
         if state in ("Failed", "Canceled"):
             raise Blocked(f"Web IQ account provisioning failed: {state}.")
         raise Waiting(f"Web IQ account is not provisioned yet: {state}.", "Rerun after provisioning completes.")
-    connection, client = account.get("connection_name"), account.get("client_id")
-    if not connection or not client:
-        raise Blocked("The web_iq output has no web-iq connection or Foundry project identity client ID.",
-                      "Rerun deploy.py up so the knowledge plan creates them.")
+    connection, client, endpoint = (account.get(key) for key in ("connection_name", "client_id", "mcp_endpoint"))
+    if not (connection and client and endpoint):
+        raise Blocked("The web_iq output has no web-iq connection, Web IQ MCP endpoint or Foundry project identity "
+                      "client ID.", "Rerun deploy.py up so the knowledge plan creates them.")
     client = guid(client, "The web_iq output's client_id")
-    source, = required_outputs(ctx, "public_context_knowledge_source_name")
-    response = search_call(ctx, "GET", knowledge_url(endpoint, "knowledgesources", source, None, version), attempts=None)
-    if response.status in (408, 429, 500, 502, 503, 504, 599):
-        raise Waiting(f"Search could not return knowledge source {source} (HTTP {response.status}).",
-                      "Rerun deploy.py up in a minute.")
+    project, = required_outputs(ctx, "foundry_project_id")
+    if not isinstance(project, str) or not re.fullmatch(
+            rf"/subscriptions/{subscription}/resourceGroups/[^/?#]+/providers/Microsoft\.CognitiveServices/accounts/"
+            r"[^/?#]+/projects/[^/?#]+", project, re.IGNORECASE):
+        raise Blocked("The foundry_project_id output is not a Foundry project in the selected subscription.")
+    response = arm(ctx, "GET", f"{ARM_API}{project}/connections/{urllib.parse.quote(connection, safe='')}"
+                               f"?api-version={FOUNDRY_CONNECTION_API_VERSION}")
     if response.status != 200:
-        raise ServiceError(f"Reading knowledge source {source}", response)
-    definition = response.json(default={})
-    parameters = (definition.get("mcpServerParameters") if isinstance(definition, dict) else None) or {}
-    authentication = parameters.get("authentication")
-    authentication = authentication if isinstance(authentication, dict) else {}
-    # Search serializes the other authentication kinds' parameters as nulls, so check the fields that decide it.
-    keyless = (authentication.get("kind") == "foundryConnection"
-               and (authentication.get("foundryConnectionParameters") or {}).get("connectionId") == connection
-               and not authentication.get("storedHeadersParameters"))
-    if parameters.get("serverURL") != account.get("mcp_endpoint") or not keyless:
-        raise Blocked(f"Knowledge source {source} doesn't call Web IQ keylessly through the {connection} connection.",
-                      "Rerun deploy.py up so the knowledge plan restores it; never store a Web IQ key in it.")
+        raise ServiceError(f"Reading Foundry connection {connection}", response)
+    body = response.json(default={})
+    settings = body.get("properties") if isinstance(body, dict) else None
+    settings = settings if isinstance(settings, dict) else {}
+    keyless = (settings.get("category") == "RemoteTool" and settings.get("authType") == "ProjectManagedIdentity"
+               and settings.get("target") == endpoint
+               and str(settings.get("audience") or "").rstrip("/") == WEB_IQ_AUDIENCE)
+    if not keyless:
+        raise Blocked(f"Foundry connection {connection} doesn't call {endpoint} keylessly as the project identity.",
+                      "Rerun deploy.py up so the knowledge plan restores it; never give it a Web IQ key.")
     receipt.update(status="binding_unconfirmed", connection=connection, client_id=client)
     ctx.state.save()
     bind = (f"In {WEB_IQ_PORTAL}, open the AppID connected to this Web IQ account ({resource_id}); on its "
@@ -2842,7 +2844,7 @@ def verify_web_iq(ctx, endpoint, version):
                       "proves it.")
     receipt["status"] = "bound_unverified"
     ctx.state.save()
-    return (f"Web IQ account provisioned and wired keylessly: the public-context source calls Web IQ through the "
+    return (f"Web IQ account provisioned and wired keylessly: the agents' Web IQ tool calls its MCP server through the "
             f"{connection} connection as the Foundry project identity ({client}), whose AppID binding is "
             "operator-confirmed; Web IQ retrieval and agent/app integration remain unverified until the agent's "
             "cited public-context line in the app")
@@ -2874,7 +2876,7 @@ def phase_verify(ctx):
         "kind": "indexedOneLake", "knowledgeSourceName": documents,
         "includeReferences": True, "includeReferenceSourceData": True},
         lambda body: document_evidence(body, documents), intents=True)
-    web_iq = verify_web_iq(ctx, endpoint, version)
+    web_iq = verify_web_iq(ctx)
     work_iq = verify_work_iq(ctx)
     ctx.state.section("verify").update(dev_ready_at=utc_now(), ingestion=ingestion, ontology=ontology, documents=document,
                                        work_iq=work_iq)

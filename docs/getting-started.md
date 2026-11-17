@@ -139,7 +139,7 @@ export TF_VAR_github_token
 
 Complete the [Web IQ](#web-iq) steps and set `web_iq_terms_accepted = true`
 before deployment. Terraform provisions the global G3 account; the agents'
-public-context tool reaches it through Search, keyless, as the Foundry project's
+public-context tool calls its MCP server directly, keyless, as the Foundry project's
 identity. The runner's `verify` phase waits until you confirm binding that
 identity to the account's AppID in the Web IQ portal.
 
@@ -159,10 +159,10 @@ comments. Keep credentials and tenant and subscription IDs out of the file.
 | `web_iq_terms_accepted` | `false` | Always: set `true` once you accept the [Web IQ](#web-iq) terms |
 | `work_iq_enabled` | `false` | You opt into the Work IQ mail tool and meet its [prerequisites](#work-iq) |
 | `knowledge_lakehouse_id`, `knowledge_ontologies` | `null`, `{}` | Never by hand on the runner path: the knowledge phase writes them after binding |
-| `knowledge_folders` | `documents`: `Files/documents`, attached | You index more document folders. An override replaces the whole map; keys can't be `web` or end in `-ontology` ([folders](ontology-knowledge.md#register-the-folders-and-the-ontology)) |
+| `knowledge_folders` | `documents`: `Files/documents`, attached | You index more document folders. An override replaces the whole map; keys can't end in `-ontology` ([folders](ontology-knowledge.md#register-the-folders-and-the-ontology)) |
 | `knowledge_base_name` | `<project_name>-knowledge` | You want another name for the agents' knowledge base; renaming replaces it |
 | `knowledge_editor_principal_ids` | `[]` | People attach a detached folder source live in the Foundry portal: they get Search Service Contributor |
-| `chat_model` | `gpt-5.4-mini`, capacity 10 | Web IQ public-context calls or `verify`'s ontology check return HTTP 429: raise the capacity |
+| `chat_model` | `gpt-5.4-mini`, capacity 10 | `verify`'s ontology check returns HTTP 429: raise the capacity |
 | `embedding_model` | `text-embedding-3-small`, capacity 10 | You change the embedding model; that rebuilds the folder sources |
 | `agent_model`, `agent_reasoning_effort` | `gpt-5.4-mini`, capacity 100; `low` | You change the agents' model, its capacity or the effort; `null` omits the effort for a model without reasoning |
 | `app` | 1 vCPU, `2Gi`, one to three replicas | Between sessions, `app = { min_replicas = 0 }` stops paying for an idle replica |
@@ -297,18 +297,17 @@ For API automation and promotion, see [`cicd/`](../cicd/README.md). For binding 
 ## Web IQ
 
 Every deployment includes Web IQ. The platform plan creates its global G3 account.
-The knowledge plan adds the knowledge source `<project>-web`, which allows only the
-Web IQ MCP `web` tool, as the only source of the knowledge base
-`<project>-public-context`, which the with-IQ agent's public-context tool reads. It
-is separate from the agents' document knowledge base, so a document question never
-triggers a web search.
+The knowledge plan adds the Foundry project's `web-iq` connection to Web IQ's MCP
+server, which the with-IQ agent's public-context tool calls, allowing only its `web`
+search. It is a separate tool from the agents' documents, so a document question
+never triggers a web search.
 
-There is no Web IQ key. The source authenticates through the Foundry project's
-`web-iq` connection: when an agent's tool queries the knowledge base, Foundry Agent
-Service calls Web IQ with a token for the project's managed identity. Web IQ uses no
-Azure RBAC; it accepts that identity once its application (client) ID is bound to
-the account's AppID. Only Agent Service resolves the connection, so a direct
-retrieval from the knowledge base, such as the runner's, can't reach Web IQ.
+There is no Web IQ key. Foundry Agent Service calls Web IQ through the `web-iq`
+connection with a token for the project's managed identity. Web IQ uses no Azure
+RBAC; it accepts that identity once its application (client) ID is bound to the
+account's AppID. The AppID is passage-only, so the tool asks for `passage` content;
+any other format fails. Only Agent Service can use the identity, so the runner can't
+call Web IQ as it.
 
 1. Before deployment, have Web IQ enabled for the paid subscription; ask your
    Microsoft representative. Azure credits do not work. Accept the
@@ -326,10 +325,10 @@ retrieval from the knowledge base, such as the runner's, can't reach Web IQ.
    `--web-iq-bound <client-id>`. The runner records your confirmation and asks again
    only if the project identity changes, for example after the project is recreated.
 
-The `verify` phase checks the account and that the source calls Web IQ through the
-`web-iq` connection with no stored key, without a billable call. It can't read the
-binding or retrieve through the source, so Web IQ retrieval stays unverified until a
-cited public-context line in the app proves the agent's tool
+The `verify` phase checks the account and that the `web-iq` connection calls Web
+IQ's MCP server as the project identity, with no key, without a billable call. It
+can't read the binding or call Web IQ as the project, so Web IQ retrieval stays
+unverified until a cited public-context line in the app proves the agent's tool
 ([runtime integration](runtime-integration.md#web-iq)).
 
 ## Work IQ
@@ -401,7 +400,7 @@ terraform apply knowledge.tfplan
 terraform output
 ```
 
-Terraform looks up the lakehouse and configured ontologies in DEV without owning their definitions. It creates one indexed OneLake source per `knowledge_folders` entry (`<project>-documents` by default), the agents' knowledge base `<project>-knowledge` over the attached folder sources, the live ontology source in the check-only knowledge base `<project>-ontology-check`, the [Web IQ](#web-iq) public-context source and knowledge base, the agents' `knowledge-base`, `public-context` and `fabric-scenario` connections, the source's keyless `web-iq` connection, and the Search identity's grants. An ID from TEST or another workspace fails the lookup. Keep the values set on subsequent runs; clearing them plans removal of knowledge objects, not a pause. No targeted apply is needed.
+Terraform looks up the lakehouse and configured ontologies in DEV without owning their definitions. It creates one indexed OneLake source per `knowledge_folders` entry (`<project>-documents` by default), the agents' knowledge base `<project>-knowledge` over the attached folder sources, the live ontology source in the check-only knowledge base `<project>-ontology-check`, the agents' `knowledge-base`, `fabric-scenario` and keyless [Web IQ](#web-iq) `web-iq` connections, and the Search identity's grants. An ID from TEST or another workspace fails the lookup. Keep the values set on subsequent runs; clearing them plans removal of knowledge objects, not a pause. No targeted apply is needed.
 
 The `fabric-scenario` connection is a non-shared native Foundry Fabric IQ
 `UserEntraToken` connection to the ontology's DEV MCP endpoint, reported by
@@ -424,7 +423,7 @@ The `verify` phase then proves **DEV ready** with your own Search token, never a
 - Every folder source, attached or not, has ingested its folder.
 - Live ontology retrieval through the check-only knowledge base returns `fabricOntology` activity and references for DEV's workspace and ontology, with **The Glass Orchard** and **Forecast variance** in the live source data (or your `--expect` facts). An answer from a document does not count.
 - Document retrieval from the agents' knowledge base cites the `documents` source. That base runs at minimal effort, so `verify` sends the question as a search intent.
-- Web IQ's account is provisioned, the public-context source calls it through the `web-iq` connection with no stored key, and you confirmed binding the project identity to its AppID (`--web-iq-bound`). No Web IQ call is made, so its retrieval stays unverified until the app.
+- Web IQ's account is provisioned, the `web-iq` connection calls its MCP server as the project identity with no key, and you confirmed binding that identity to its AppID (`--web-iq-bound`). No Web IQ call is made, so its retrieval stays unverified until the app.
 - With Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection exist; no Work IQ call is made.
 
 Report DEV ready only after `verify` succeeds. The [runtime authentication and retrieval example](ontology-knowledge.md#supply-the-end-users-identity-at-query-time) shows the user header the live source needs.

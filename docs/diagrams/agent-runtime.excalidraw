@@ -33,7 +33,7 @@
       "locked": true,
       "customData": {
         "title": "The app calls two prompt agents",
-        "description": "A signed-in user's browser runs the React single-page app, signs in with MSAL and gets a token for https://ai.azure.com. The Azure Container Apps web app's server verifies that token's issuer, audience, tenant, client and scope, then forwards it unchanged to two prompt agents in one Foundry project; the app holds no credential or shared token, and deployment consent is a separate boundary. Both agents share one model and one set of instructions: the with-IQ agent calls only the read-only tools each question needs, and the without-IQ agent has no tools, for comparison. Fabric IQ queries live ontology facts as the signed-in user. Foundry IQ retrieves approved documents and Web IQ supplies public context from its own knowledge base, both with the project's managed identity; Web IQ queries use public terms only. The optional Work IQ tool fetches the user's own mail, read-only, through OAuth identity passthrough. Each user consents once to Fabric IQ and to Work IQ. Application Insights accepts only Entra ID and holds the app's and the agents' traces as one operation. Answers cite only tool results. A deployed agent is not readiness: prove answers with each user's own token and isolation with a second user. A turn can take up to 225 seconds, inside Container Apps' 240-second limit.",
+        "description": "A signed-in user's browser runs the React single-page app, signs in with MSAL and gets a token for https://ai.azure.com. The Azure Container Apps web app's server verifies that token's issuer, audience, tenant, client and scope, then forwards it unchanged to two prompt agents in one Foundry project; the app holds no credential or shared token, and deployment consent is a separate boundary. Both agents share one model and one set of instructions: the with-IQ agent calls only the read-only tools each question needs, and the without-IQ agent has no tools, for comparison. Fabric IQ queries live ontology facts as the signed-in user. Foundry IQ retrieves approved documents from its knowledge base and Web IQ's own MCP server supplies public web passages, both with the project's managed identity; Web IQ queries use public terms only. The optional Work IQ tool fetches the user's own mail, read-only, through OAuth identity passthrough. Each user consents once to Fabric IQ and to Work IQ. Application Insights accepts only Entra ID and holds the app's and the agents' traces as one operation. Answers cite only tool results. A deployed agent is not readiness: prove answers with each user's own token and isolation with a second user. A turn can take up to 225 seconds, inside Container Apps' 240-second limit.",
         "role": "page"
       },
       "index": "a0"
@@ -2005,7 +2005,7 @@
       "type": "text",
       "x": 876,
       "y": 698,
-      "width": 257.9375,
+      "width": 212.4191,
       "height": 20,
       "angle": 0,
       "strokeColor": "#000000",
@@ -2021,7 +2021,7 @@
       "frameId": null,
       "roundness": null,
       "seed": 447412194,
-      "version": 1,
+      "version": 2,
       "versionNonce": 1578574594,
       "isDeleted": false,
       "boundElements": [],
@@ -2030,8 +2030,8 @@
       "locked": false,
       "fontSize": 16,
       "fontFamily": 2,
-      "text": "Public context, own knowledge base",
-      "originalText": "Public context, own knowledge base",
+      "text": "Public context, web passages",
+      "originalText": "Public context, web passages",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,

@@ -204,7 +204,7 @@ output "fabric_iq_connections" {
 }
 
 output "web_iq" {
-  description = "Web IQ account, public service endpoints and its keyless route: the web-iq connection, through which Agent Service authenticates the public-context source as the Foundry project identity, and that identity's application (client) ID, which an operator binds to the account's AppID in the Web IQ portal (both null until knowledge setup)."
+  description = "Web IQ account, public service endpoints and its keyless route: the web-iq connection, through which the agents' Web IQ tool calls Web IQ's MCP server as the Foundry project identity, and that identity's application (client) ID, which an operator binds to the account's AppID in the Web IQ portal (both null until knowledge setup)."
   value = {
     resource_id     = azapi_resource.web_iq.id
     management_url  = "https://management.azure.com${azapi_resource.web_iq.id}?api-version=2026-06-01-preview"
@@ -214,16 +214,6 @@ output "web_iq" {
     connection_name = one(azapi_resource.web_iq_connection[*].name)
     client_id       = one(data.azuread_service_principal.foundry_project[*].client_id)
   }
-}
-
-output "public_context_knowledge_base_name" {
-  description = "Foundry IQ knowledge base whose only source is Web IQ, for public context through the agents' Web IQ tool; absent until knowledge setup."
-  value       = one(restful_resource.public_context_base[*].body.name)
-}
-
-output "public_context_knowledge_source_name" {
-  description = "Web IQ MCP server knowledge source of the public-context knowledge base; absent until knowledge setup."
-  value       = one(restful_resource.public_context_source[*].body.name)
 }
 
 output "foundry_agents" {
@@ -241,15 +231,15 @@ output "agent_settings" {
 }
 
 output "foundry_tool_connections" {
-  description = "The agents' MCP tool connections besides Fabric IQ, with the server URL each tool must name: the Foundry IQ knowledge base and Web IQ's public-context knowledge base, each read as the project identity (null until knowledge setup), and Work IQ's MCP server, as each user through OAuth identity passthrough (null unless work_iq_enabled)."
+  description = "The agents' MCP tool connections besides Fabric IQ, with the server URL each tool must name: the Foundry IQ knowledge base and, for public context, Web IQ's MCP server, each as the project identity (null until knowledge setup), and Work IQ's MCP server, as each user through OAuth identity passthrough (null unless work_iq_enabled)."
   value = {
     knowledge_base = var.knowledge_lakehouse_id == null ? null : {
       name       = azapi_resource.knowledge_base_connection[0].name
       server_url = local.knowledge_base_mcp_endpoint
     }
     public_context = var.knowledge_lakehouse_id == null ? null : {
-      name       = azapi_resource.public_context_connection[0].name
-      server_url = local.public_context_mcp_endpoint
+      name       = azapi_resource.web_iq_connection[0].name
+      server_url = local.web_iq_mcp_endpoint
     }
     work_iq_mail = var.work_iq_enabled ? {
       name       = azapi_resource.work_iq_connection[0].name

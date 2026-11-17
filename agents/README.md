@@ -8,7 +8,7 @@ One Foundry prompt agent definition in two variants: the same model, the same in
 same question, with only the tools changing, so the app can compare an answer with IQ against one
 without. Each tool is an MCP tool limited to its read-only `allowed_tools`, without approval steps.
 The agents run with the signed-in user's token, which the app forwards: Fabric IQ and Work IQ mail
-act as that user, and the agents read the Foundry IQ and Web IQ knowledge bases as the Foundry
+act as that user, and the agents read the Foundry IQ knowledge base and call Web IQ as the Foundry
 project.
 
 | Variant | Directory | Runner key | Agent name | Display name | Tools |
@@ -27,7 +27,7 @@ app as `AGENT_WITH_IQ` and `AGENT_WITHOUT_IQ`.
 | `instructions.md` | All, byte-identical | The shared instructions, sent as the definition's `instructions`. |
 | `tools/FabricIQOntology.json` | With IQ | `fabric_iq_ontology`: `ScenarioOntology`'s ontology endpoint, allowing only `ask_ontology`, as the user. |
 | `tools/FoundryIQKnowledge.json` | With IQ | `foundry_iq_knowledge`: the agents' knowledge base of approved documents, such as `starter.txt`, allowing only `knowledge_base_retrieve`, as the project. |
-| `tools/WebIQPublicContext.json` | With IQ | `web_iq_public_context`: the `<project>-public-context` knowledge base, whose only source is Web IQ, allowing only `knowledge_base_retrieve`, as the project. |
+| `tools/WebIQPublicContext.json` | With IQ | `web_iq_public_context`: Web IQ's MCP server, allowing only its `web` search with passage content, through the keyless `web-iq` connection as the project. |
 | `tools/WorkIQMail.json` | With IQ, when Work IQ is enabled | `work_iq_mail`: Work IQ's MCP server, allowing only `fetch`, on the `work-iq` connection, as the user. |
 
 Each tool file holds exactly `type: mcp`, its `server_label`, `server_description`, `server_url`,

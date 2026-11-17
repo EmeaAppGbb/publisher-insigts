@@ -84,8 +84,8 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
   [publicContext]: {
     with_iq: {
       tools: [{
-        server: 'web_iq_public_context', tool: 'knowledge_base_retrieve',
-        arguments: '{"queries":["centrifugal pump maintenance guidance"]}',
+        server: 'web_iq_public_context', tool: 'web',
+        arguments: '{"query":"centrifugal pump maintenance guidance","contentFormat":"passage","maxResults":3,"maxLength":1500}',
       }],
       answer: [
         '**Public context, not company guidance:** general guidance for centrifugal pumps recommends regular checks of seals, bearings, vibration and alignment, with service intervals set by operating hours and conditions [Web1].',

@@ -6,7 +6,7 @@ This uses the native [`fabricOntology` knowledge source (preview)](https://learn
 
 ## Two retrieval paths
 
-[![Indexed OneLake document folders feed the agents' knowledge base; the optional live ontology source sits in a check-only knowledge base that only the runner's verify queries, and Web IQ feeds its own public-context knowledge base, with distinct indexing and end-user authorization.](diagrams/knowledge-retrieval.svg)](diagrams/knowledge-retrieval.svg)
+[![Indexed OneLake document folders feed the agents' knowledge base; the optional live ontology source sits in a check-only knowledge base that only the runner's verify queries, with distinct indexing and end-user authorization.](diagrams/knowledge-retrieval.svg)](diagrams/knowledge-retrieval.svg)
 
 One-way arrows show indexed content flowing toward a knowledge base; paired
 arrowheads show live request/response interactions, not data replication. Each
@@ -14,7 +14,7 @@ arrowheads show live request/response interactions, not data replication. Each
 checked every five minutes. The agents' knowledge base, `<project>-knowledge`, holds
 only the attached folders, never an ontology. The live `fabricOntology` sources sit
 in `<project>-ontology-check`, which only the runner's `verify` queries, with the
-deployer's own token. Web IQ feeds its own `<project>-public-context` base. The
+deployer's own token. Web IQ isn't a knowledge source: the agents call it directly. The
 with-IQ agent reads live facts through **native Fabric IQ** as the signed-in user
 instead, as the [runtime diagram](runtime-integration.md#runtime-at-a-glance) shows.
 Registering the Search source doesn't remove its end-user token requirement.
@@ -113,12 +113,11 @@ reads, and checks it for changes every five minutes with the embedding model. Gi
   waiting; re-applying the knowledge plan detaches it again. At least one folder must
   be attached.
 - An override replaces the whole default map, so copy the `documents` entry you keep.
-  Keys can't be `web` or end in `-ontology`: those source names belong to the Web IQ
-  and ontology sources.
+  Keys can't end in `-ontology`: those source names belong to the ontology sources.
 - Removing a key rebuilds the knowledge base before deleting the source, because
   Search refuses to delete a source that a base references.
 - `knowledge_base_name` optionally renames the agents' knowledge base (default
-  `<project>-knowledge`). It must differ from the check-only and public-context bases;
+  `<project>-knowledge`). It must differ from the check-only base;
   renaming replaces the base, and the agents follow the `knowledge_base_name` output.
 
 The agents' knowledge base runs at `minimal` retrieval effort with extractive output:
@@ -144,7 +143,7 @@ There are two separate authentication layers:
 
 | Layer | Requirement |
 | --- | --- |
-| Caller -> Azure AI Search knowledge base | Normal Search authentication and `Search Index Data Reader` for an Entra caller. The agents' Foundry IQ and Web IQ connections use the project's managed identity for this hop; the runner's `verify` uses the deployer's own token. |
+| Caller -> Azure AI Search knowledge base | Normal Search authentication and `Search Index Data Reader` for an Entra caller. The agents' Foundry IQ connection uses the project's managed identity for this hop; the runner's `verify` uses the deployer's own token. |
 | Knowledge base -> Fabric ontology | An **end-user** token in `x-ms-query-source-authorization`, scoped to `https://search.azure.com/.default`. Search exchanges it for a Fabric-scoped token on the user's behalf. The user must be allowed to read the ontology and its bound data. |
 
 The Search and Fabric resources must share an Entra tenant. Enable the Fabric ontology tenant settings and complete any tenant consent required for the documented delegated flow. **Do not use the Search or Foundry managed identity token as a substitute for the end-user token.** Ontology retrieval does not inherit access from the seeding identity or Search's workspace Contributor grant.
@@ -176,7 +175,7 @@ Content-Type: application/json
 
 Quote the values in a question: unquoted, Fabric can read a bare value as an empty one. Tokens are placeholders, **not configuration values to store in tfvars or source control**. Acquire the user's token in your application's approved sign-in/OBO flow, not from a chat prompt. Forward it per request, protect logs, and refuse an ontology query if the required identity is missing.
 
-For a consuming Foundry agent, a knowledge-base MCP connection would need this per-request header on its MCP tool, through [structured inputs or supported OAuth identity passthrough](https://learn.microsoft.com/azure/foundry/agents/how-to/foundry-iq-connect#optional-enforce-permissions-with-per-request-headers); creating the managed-identity connection alone does not complete ontology authentication. The shipped agents therefore never query the check-only base: the with-IQ agent reads live facts through its [Fabric IQ tool](runtime-integration.md#iq-tools) as the signed-in user, and its knowledge-base tools read only documents and public context with the project's managed identity.
+For a consuming Foundry agent, a knowledge-base MCP connection would need this per-request header on its MCP tool, through [structured inputs or supported OAuth identity passthrough](https://learn.microsoft.com/azure/foundry/agents/how-to/foundry-iq-connect#optional-enforce-permissions-with-per-request-headers); creating the managed-identity connection alone does not complete ontology authentication. The shipped agents therefore never query the check-only base: the with-IQ agent reads live facts through its [Fabric IQ tool](runtime-integration.md#iq-tools) as the signed-in user, its Foundry IQ tool reads only documents, and its Web IQ tool calls Web IQ directly, both with the project's managed identity.
 
 For an untouched seed, the example question should return **The Glass Orchard** with its **Forecast variance** signal, among the five material signals. Inspect the retrieval response for an `activity` entry and `references` of type `fabricOntology`, with the expected workspace and ontology IDs. A correct-sounding answer from `starter.txt` alone is **not** proof of ontology integration. Include a user without Fabric access in your derived project's authorization checks and surface denied/failed sources rather than silently substituting the document snapshot.
 

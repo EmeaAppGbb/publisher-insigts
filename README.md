@@ -17,8 +17,8 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 - **Fabric:** DEV/TEST workspaces and DEV-to-TEST deployment pipeline; GitHub credentials connection only with Git synchronization enabled.
 - **DEV items:** `Books` lakehouse, `SeedBooks`, `ComputeBookSignals`, `BooksOntology`, `BindBooks` and `Bootstrap` deployment plan.
 - **Seed data:** a fictional book portfolio: 8 titles, 18 editions, 26 weeks of sales, stock, public signals and campaigns, the latest week's signals and decision options computed from them, and `Files/documents/starter.txt` ([data contract](scenario/data/README.md)).
-- **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, public-context, Fabric IQ, Application Insights and, only with Work IQ, Work IQ connections.
-- **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, a check-only knowledge base with the live ontology source, and the Web IQ public-context source and knowledge base.
+- **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, keyless Web IQ, Fabric IQ, Application Insights and, only with Work IQ, Work IQ connections.
+- **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, and a check-only knowledge base with the live ontology source.
 - **Web IQ:** global G3 account, called keyless as the Foundry project identity; linking the AppID and binding that identity in the portal is manual.
 - **Prompt agents:** `<project>-with-iq`, with the Fabric IQ, Foundry IQ, Web IQ and, opt-in, Work IQ mail tools, and `<project>-without-iq`, with none, published by the deployment runner.
 - **Web app:** the React page and its Node server in one container, at a public HTTPS URL.
@@ -123,7 +123,7 @@ Remaining cleanup:
 
 - **Development baseline:** billable resources, authenticated public endpoints (including the web app), and preview ontology, deployment-plan, Foundry IQ, Fabric IQ tool and Web IQ features.
 - **Separate next steps:** TEST starts empty; [native promotion](cicd/README.md) is a separate workflow. PROD, production ingestion, the scenario workflow, granting other users access, and hardening such as private networking belong to your derived project.
-- **Runtime identity:** live ontology retrieval needs an end-user token; managed identity alone is insufficient. The with-IQ agent's Fabric IQ tool, and its optional Work IQ mail tool, run as the signed-in user; its Foundry IQ and Web IQ tools read their knowledge bases with the project's managed identity. See [runtime authentication](docs/ontology-knowledge.md#supply-the-end-users-identity-at-query-time) and the [access model](docs/runtime-integration.md#access-model).
+- **Runtime identity:** live ontology retrieval needs an end-user token; managed identity alone is insufficient. The with-IQ agent's Fabric IQ tool, and its optional Work IQ mail tool, run as the signed-in user; its Foundry IQ tool reads the knowledge base, and its Web IQ tool calls Web IQ's MCP server through the keyless `web-iq` connection, both with the project's managed identity. See [runtime authentication](docs/ontology-knowledge.md#supply-the-end-users-identity-at-query-time) and the [access model](docs/runtime-integration.md#access-model).
 - **Work IQ is opt-in:** `work_iq_enabled = false` by default. It needs a mailbox per user, a Copilot Credits spending policy that covers the Work IQ API, administrator consent and each user's one-time consent; see [Work IQ](docs/getting-started.md#work-iq). Without such a tenant it stays unverified.
 
 ## Contributing

@@ -1409,8 +1409,8 @@ class ReadinessTests(unittest.TestCase):
                          (deploy.SCENARIO.document_question, "indexedOneLake", "demo-documents"))
         # Only the agents' minimal-effort knowledge base takes the question as a search intent.
         self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True])
-        # Web IQ's source authenticates only through Agent Service, so the runner checks its wiring, not a retrieval.
-        self.assertEqual(web_iq.call_args.args[1:], ("https://srch.search.windows.net", "v1"))
+        # Only Agent Service can use the project identity, so the runner checks the Web IQ wiring, not a search.
+        self.assertEqual(web_iq.call_args.args[1:], ())
         self.assertIn("Web IQ wired", report)
         self.assertIn("ingestion succeeded for 3 OneLake folder source(s)", report)
         self.assertIn("live ontology retrieval through demo-ontology-check and document retrieval through demo-knowledge",
@@ -2328,8 +2328,7 @@ class AgentAndAppTests(unittest.TestCase):
             "foundry_tool_connections": {
                 "knowledge_base": {"name": "demo-knowledge-mcp",
                                    "server_url": f"{self.SEARCH}/knowledgebases/demo-knowledge/mcp?api-version=v1"},
-                "public_context": {"name": "public-context-mcp",
-                                   "server_url": f"{self.SEARCH}/knowledgebases/demo-public-context/mcp?api-version=v1"},
+                "public_context": {"name": "web-iq", "server_url": "https://api.microsoft.ai/v3/mcp"},
                 "work_iq_mail": mail if work_iq else None},
             "fabric_iq_connections": {deploy.SCENARIO.registration: {
                 "name": "fabric-iq-scenario", "server_url": f"https://api.fabric.microsoft.com/v1/mcp/dataPlane/"
@@ -2397,7 +2396,8 @@ class AgentAndAppTests(unittest.TestCase):
         self.assertEqual((tools["work_iq_mail"]["project_connection_id"], tools["work_iq_mail"]["server_url"]),
                          ("work-iq", "https://workiq.svc.cloud.microsoft/mcp"))
         self.assertEqual(tools["foundry_iq_knowledge"]["project_connection_id"], "demo-knowledge-mcp")
-        self.assertEqual(tools["web_iq_public_context"]["project_connection_id"], "public-context-mcp")
+        self.assertEqual((tools["web_iq_public_context"]["server_url"], tools["web_iq_public_context"]["project_connection_id"]),
+                         ("https://api.microsoft.ai/v3/mcp", "web-iq"))
         for method, url, body, headers in http.calls:
             self.assertEqual(headers["Authorization"], f"Bearer {TOKEN}")
         scopes = {call[call.index("--scope") + 1] for call in ctx.shell.matching(command("az", "account", "get-access-token"))}
@@ -2834,27 +2834,28 @@ class RetryTests(unittest.TestCase):
 
 class WebIqTests(unittest.TestCase):
     RESOURCE_ID = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.WebIQ/accounts/demo"
+    PROJECT_ID = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/ai/projects/demo"
     CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-    KEYLESS = {"kind": "foundryConnection", "foundryConnectionParameters": {"connectionId": "web-iq"}}
+    KEYLESS = {"category": "RemoteTool", "authType": "ProjectManagedIdentity", "target": "https://api.microsoft.ai/v3/mcp",
+               "audience": "https://api.microsoft.ai", "isSharedToAll": False}
 
-    def web_context(self, *, state="Succeeded", authentication=KEYLESS, bound=None, source=None):
+    def web_context(self, *, state="Succeeded", connection=KEYLESS, bound=None, response=None):
         http = FakeHttp()
         http.add("GET", r"/providers/Microsoft\.WebIQ/accounts/demo\?api-version=2026-06-01-preview$",
                  reply(body={"id": self.RESOURCE_ID, "properties": {"provisioningState": state}}))
-        http.add("GET", r"^https://demo\.search\.windows\.net/knowledgesources/demo-web\?api-version=test$",
-                 source or reply(body={"name": "demo-web", "kind": "mcpServer", "mcpServerParameters": {
-                     "serverURL": "https://api.microsoft.ai/v3/mcp", "authentication": authentication}}))
+        http.add("GET", r"/accounts/ai/projects/demo/connections/web-iq\?api-version=2025-10-01-preview$",
+                 response or reply(body={"name": "web-iq", "properties": connection}))
         ctx = make_context(self, make_root(self), FakeShell([TOKEN_RULE]), http, web_iq_bound=bound)
         ctx.cache["outputs"] = {
             "web_iq": {"resource_id": self.RESOURCE_ID, "mcp_endpoint": "https://api.microsoft.ai/v3/mcp",
                        "connection_name": "web-iq", "client_id": self.CLIENT},
-            "public_context_knowledge_source_name": "demo-web",
+            "foundry_project_id": self.PROJECT_ID,
         }
         ctx.state.section("target")["subscription_id"] = "sub"
         return ctx
 
     def verify(self, ctx):
-        return deploy.verify_web_iq(ctx, "https://demo.search.windows.net", "test")
+        return deploy.verify_web_iq(ctx)
 
     def test_missing_web_iq_output_blocks_readiness_without_cloud_calls(self):
         ctx = make_context(self, make_root(self))
@@ -2920,7 +2921,7 @@ class WebIqTests(unittest.TestCase):
         receipt = ctx.state.section("web_iq")
         self.assertEqual((receipt["status"], receipt["connection"], receipt["client_id"]),
                          ("binding_unconfirmed", "web-iq", self.CLIENT))
-        # Nothing billable: the runner never calls Web IQ itself, only reads the account and the source.
+        # Nothing billable: the runner never calls Web IQ itself, only reads the account and the connection.
         self.assertEqual([call[0] for call in ctx.http.calls], ["GET", "GET"])
 
     def test_the_confirmation_must_name_the_identity_and_lasts_only_for_it(self):
@@ -2947,19 +2948,16 @@ class WebIqTests(unittest.TestCase):
             deploy.parse_arguments(["up", "--web-iq-bound", "not-a-client-id"])
         self.assertEqual(stop.exception.code, deploy.USAGE)
 
-    def test_only_the_named_connection_without_stored_headers_is_keyless(self):
-        # Search returns the other kinds' parameters as nulls.
-        ctx = self.web_context(authentication={**self.KEYLESS, "storedHeadersParameters": None}, bound=self.CLIENT)
+    def test_only_the_project_identitys_connection_to_web_iq_is_keyless(self):
+        ctx = self.web_context(connection={**self.KEYLESS, "audience": "https://api.microsoft.ai/"}, bound=self.CLIENT)
         self.assertIn("wired keylessly", self.verify(ctx))
-        stored = {"headers": {"x-apikey": "<redacted>"}}
-        for authentication in ({"kind": "storedHeaders", "storedHeadersParameters": stored},
-                               {**self.KEYLESS, "storedHeadersParameters": stored},
-                               {"kind": "foundryConnection", "foundryConnectionParameters": {"connectionId": "other"}},
-                               {"kind": "foundryConnection", "foundryConnectionParameters": None},
-                               None):
-            with self.subTest(authentication=authentication):
-                ctx = self.web_context(authentication=authentication, bound=self.CLIENT)
-                with self.assertRaisesRegex(deploy.Blocked, "doesn't call Web IQ keylessly through the web-iq connection"):
+        for change in ({"authType": "ApiKey"}, {"authType": "UserEntraToken"}, {"category": "CustomKeys"},
+                       {"target": "https://api.microsoft.ai/v3/search/web"}, {"audience": "https://search.azure.com/"},
+                       {"audience": None}):
+            with self.subTest(change=change):
+                ctx = self.web_context(connection={**self.KEYLESS, **change}, bound=self.CLIENT)
+                with self.assertRaisesRegex(deploy.Blocked, "connection web-iq doesn't call https://api.microsoft.ai/v3/mcp "
+                                                            "keylessly as the project identity"):
                     self.verify(ctx)
                 self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
 
@@ -2968,18 +2966,25 @@ class WebIqTests(unittest.TestCase):
             ctx = self.web_context(state=state, bound=self.CLIENT)
             with self.assertRaises(error):
                 self.verify(ctx)
-            self.assertFalse([call for call in ctx.http.calls if "/knowledgesources/" in call[1]])
-        for missing in ("connection_name", "client_id"):
+            self.assertFalse([call for call in ctx.http.calls if "/connections/" in call[1]])
+        for missing in ("connection_name", "client_id", "mcp_endpoint"):
             ctx = self.web_context(bound=self.CLIENT)
             ctx.cache["outputs"]["web_iq"][missing] = None
-            with self.subTest(missing=missing), \
-                    self.assertRaisesRegex(deploy.Blocked, "no web-iq connection or Foundry project identity client ID"):
+            with self.subTest(missing=missing), self.assertRaisesRegex(
+                    deploy.Blocked, "no web-iq connection, Web IQ MCP endpoint or Foundry project identity client ID"):
                 self.verify(ctx)
-        # The source's definition is an ordinary read: retried in transit, then a transient failure waits.
-        ctx = self.web_context(bound=self.CLIENT, source=reply(503))
-        with self.assertRaisesRegex(deploy.Waiting, "HTTP 503"):
+        for project in (self.PROJECT_ID.replace("/sub/", "/another/"),
+                        self.PROJECT_ID.rsplit("/projects/", 1)[0]):
+            ctx = self.web_context(bound=self.CLIENT)
+            ctx.cache["outputs"]["foundry_project_id"] = project
+            with self.subTest(project=project), self.assertRaisesRegex(deploy.Blocked, "not a Foundry project"):
+                self.verify(ctx)
+            self.assertFalse([call for call in ctx.http.calls if "/connections/" in call[1]])
+        # The connection is an ordinary read: transient failures are retried, then reported.
+        ctx = self.web_context(bound=self.CLIENT, response=reply(503))
+        with self.assertRaisesRegex(deploy.ServiceError, "Reading Foundry connection web-iq"):
             self.verify(ctx)
-        self.assertEqual(ctx.http.attempts[-1], None)
+        self.assertEqual(len([call for call in ctx.http.calls if "/connections/" in call[1]]), 5)
         self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
         ctx = self.web_context(bound=self.CLIENT)
         ctx.cache["outputs"]["web_iq"]["resource_id"] = self.RESOURCE_ID.replace("/sub/", "/another/")

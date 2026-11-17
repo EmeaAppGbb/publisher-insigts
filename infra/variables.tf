@@ -201,9 +201,9 @@ variable "knowledge_base_name" {
 
   validation {
     condition = var.knowledge_base_name == null ? true : (
-      !contains(["${var.project_name}-ontology-check", "${var.project_name}-public-context"], var.knowledge_base_name)
+      var.knowledge_base_name != "${var.project_name}-ontology-check"
     )
-    error_message = "knowledge_base_name must differ from the ontology check-only and public-context knowledge bases."
+    error_message = "knowledge_base_name must differ from the ontology check-only knowledge base."
   }
 }
 
@@ -231,10 +231,10 @@ variable "knowledge_folders" {
     error_message = "Knowledge folder keys must be 2-32 lowercase letters, digits or single hyphens, starting with a letter and ending with a letter or digit."
   }
 
-  # Folder source names share Search's namespace with the <project_name>-web and <project_name>-<key>-ontology sources.
+  # Folder source names share Search's namespace with the <project_name>-<key>-ontology sources.
   validation {
-    condition     = alltrue([for name in keys(var.knowledge_folders) : name != "web" && !endswith(name, "-ontology")])
-    error_message = "Knowledge folder keys can't be web or end with -ontology: those source names belong to the Web IQ and ontology sources."
+    condition     = alltrue([for name in keys(var.knowledge_folders) : !endswith(name, "-ontology")])
+    error_message = "Knowledge folder keys can't end with -ontology: those source names belong to the ontology sources."
   }
 
   validation {
@@ -307,7 +307,7 @@ variable "search_identity_ready" {
 }
 
 variable "chat_model" {
-  description = "Supported Foundry IQ query-planning and answer-synthesis model, version, deployment SKU and quota units. Every Web IQ public-context call and verify's ontology check use it; the agents' knowledge base runs at minimal effort, which runs no model. A low capacity throttles them with HTTP 429."
+  description = "Supported Foundry IQ query-planning and answer-synthesis model, version, deployment SKU and quota units. Verify's ontology check uses it; the agents' knowledge base runs at minimal effort, which runs no model. A low capacity throttles them with HTTP 429."
   type = object({
     name     = optional(string, "gpt-5.4-mini")
     version  = optional(string, "2026-03-17")

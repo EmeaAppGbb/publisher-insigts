@@ -17,8 +17,8 @@ VALUES = {
     "agent_reasoning_effort": "low",
     "knowledge_base_mcp_endpoint": "https://srch.search.windows.net/knowledgebases/demo-knowledge/mcp?api-version=v1",
     "knowledge_base_connection": "knowledge-base",
-    "public_context_mcp_endpoint": "https://srch.search.windows.net/knowledgebases/demo-public-context/mcp?api-version=v1",
-    "public_context_connection": "public-context",
+    "public_context_mcp_endpoint": "https://api.microsoft.ai/v3/mcp",
+    "public_context_connection": "web-iq",
     "fabric_iq_mcp_endpoint": "https://api.fabric.microsoft.com/v1/mcp/dataPlane/workspaces/w/items/o/ontologyEndpoint",
     "fabric_iq_connection": "fabric-iq-scenario",
     "work_iq_mail_mcp_endpoint": "https://workiq.svc.cloud.microsoft/mcp",
@@ -66,7 +66,7 @@ class FoundryAgentTests(unittest.TestCase):
         self.assertEqual(tools["with_iq"], {
             "fabric_iq_ontology": (["ask_ontology"], "fabric-iq-scenario"),
             "foundry_iq_knowledge": (["knowledge_base_retrieve"], "knowledge-base"),
-            "web_iq_public_context": (["knowledge_base_retrieve"], "public-context"),
+            "web_iq_public_context": (["web"], "web-iq"),
             "work_iq_mail": (["fetch"], "work-iq")})
         self.assertEqual(tools["without_iq"], {})
 
