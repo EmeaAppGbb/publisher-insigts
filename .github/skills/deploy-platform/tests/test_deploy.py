@@ -32,6 +32,8 @@ OPERATION = "77777777-7777-4777-8777-777777777777"
 SEED_JOB = "88888888-8888-4888-8888-888888888888"
 BIND_JOB = "99999999-9999-4999-8999-999999999999"
 SIGNALS_JOB = "16161616-1616-4616-8616-161616161616"
+KNOWLEDGE = "17171717-1717-4717-8717-171717171717"
+KNOWLEDGE_JOB = "18181818-1818-4818-8818-181818181818"
 SQL_ENDPOINT = ("example-endpoint.datawarehouse.fabric.microsoft.com", "14141414-1414-4414-8414-141414141414")
 RERUN_JOB = "13131313-1313-4313-8313-131313131313"
 TENANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -53,6 +55,11 @@ REQUEST = {
 
 def reply(status=200, body=None, headers=None):
     return deploy.Response(status, headers or {}, b"" if body is None else json.dumps(body).encode())
+
+
+def onelake_document(name):
+    """The doc_url Search returns for a file in the DEV lakehouse's documents folder."""
+    return f"https://onelake.blob.fabric.microsoft.com/{WORKSPACE}/{LAKEHOUSE}/Files/documents/{name}"
 
 
 class FakeShell:
@@ -208,8 +215,9 @@ ITEMS = {"value": [
     {"id": SIGNALS, "type": "Notebook", "displayName": NAMES["signals"], "workspaceId": WORKSPACE},
     {"id": ONTOLOGY, "type": "Ontology", "displayName": NAMES["ontology"], "workspaceId": WORKSPACE},
     {"id": BIND, "type": "Notebook", "displayName": NAMES["bind"], "workspaceId": WORKSPACE},
+    {"id": KNOWLEDGE, "type": "Notebook", "displayName": NAMES["knowledge"], "workspaceId": WORKSPACE},
 ]}
-RUNS = ((SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), (BIND, BIND_JOB))
+RUNS = ((SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), (BIND, BIND_JOB), (KNOWLEDGE, KNOWLEDGE_JOB))
 
 
 def bootstrap_http(root, connection_states=("ConnectedAndInitialized",), status=None, definitions=(True,)):
@@ -231,6 +239,9 @@ def bootstrap_http(root, connection_states=("ConnectedAndInitialized",), status=
     http.add("GET", rf"/lakehouses/{LAKEHOUSE}$", reply(body={"properties": {"defaultSchema": "dbo", "sqlEndpointProperties": {
         "connectionString": SQL_ENDPOINT[0], "id": SQL_ENDPOINT[1], "provisioningStatus": "Success"}}}))
     http.add("POST", r"/getDefinition$", *[reply(body=tmdl(bound)) for bound in definitions])
+    # The plan's post-action already published the documents; tests that need another answer insert their own.
+    http.add("GET", rf"/items/{KNOWLEDGE}/jobs/instances$",
+             reply(body={"value": [{"id": KNOWLEDGE_JOB, "status": "Completed"}]}))
     return http
 
 
@@ -743,7 +754,7 @@ class BootstrapTests(unittest.TestCase):
             "errorCode": "FeatureNotAvailable", "message": "Specifying a deploymentPlan is not supported."})]))
         http.add("POST", r"/git/updateFromGit$", reply(202, headers={"x-ms-operation-id": OPERATION}))
         for item, job in RUNS:
-            http.add("GET", rf"/items/{item}/jobs/instances$", reply(body={"value": []}))
+            http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"), [reply(body={"value": []})]))
             http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
                 "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
             http.add("GET", rf"/items/{item}/jobs/instances/{job}$",
@@ -905,7 +916,8 @@ class ScenarioContractTests(unittest.TestCase):
         self.assertEqual(deploy.SCENARIO.items, (("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
                                                  ("signals", "Notebook", "ComputeBookSignals"),
                                                  ("ontology", "Ontology", "BooksOntology"),
-                                                 ("bind", "Notebook", "BindBooks")))
+                                                 ("bind", "Notebook", "BindBooks"),
+                                                 ("knowledge", "Notebook", "PublishBooksKnowledge")))
         self.assertEqual((deploy.SCENARIO.plan, deploy.SCENARIO.registration, deploy.SCENARIO.expression),
                          ("Bootstrap", "scenario", "BooksLakehouse"))
         self.assertEqual(deploy.SCENARIO.tables, ("titles", "editions", "campaigns", "title_signals", "decision_options",
@@ -913,12 +925,16 @@ class ScenarioContractTests(unittest.TestCase):
         self.assertEqual([(step.item, step.parameters, step.skip_completed) for step in deploy.SCENARIO.runs], [
             ("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
             ("signals", {"lakehouse_name": "Books"}, True),
-            ("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False)])
-        self.assertEqual([step.reads for step in deploy.SCENARIO.runs], [(), ("seed",), ()])
-        self.assertEqual(deploy.run_order(), "SeedBooks, ComputeBookSignals and BindBooks")
+            ("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
+            ("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True)])
+        self.assertEqual([step.reads for step in deploy.SCENARIO.runs], [(), ("seed",), (), ()])
+        # The documents do not depend on the binding: the publisher runs once even when the binding is verified.
+        self.assertEqual([step.binding_chain for step in deploy.SCENARIO.runs], [True, True, True, False])
+        self.assertEqual(deploy.run_order(), "SeedBooks, ComputeBookSignals, BindBooks and PublishBooksKnowledge")
         self.assertEqual(deploy.SCENARIO.expected_facts, ("The Glass Orchard", "Forecast variance"))
-        # The default knowledge_folders key, which SeedBooks' Files/documents folder fills.
+        # The default knowledge_folders key, whose Files/documents folder SeedBooks and PublishBooksKnowledge fill.
         self.assertEqual(deploy.SCENARIO.document_source, "documents")
+        self.assertEqual(deploy.SCENARIO.document_file, "bks-pol-001-reprint-and-stock-policy-v1.md")
 
     def test_the_scenario_descriptor_is_self_consistent(self):
         lakehouse, ontology = deploy.scenario_name("lakehouse"), deploy.scenario_name("ontology")
@@ -935,13 +951,16 @@ class ScenarioContractTests(unittest.TestCase):
         self.assertEqual(deploy.knowledge.registration_name(deploy.SCENARIO.registration), deploy.SCENARIO.registration)
         self.assertEqual(deploy.knowledge.description_text(deploy.SCENARIO.registration_description),
                          deploy.SCENARIO.registration_description)
-        self.assertIn("indexed starter document", deploy.SCENARIO.document_question)
+        # The document question names the approved document whose passage must answer it.
+        title = (REPO / "scenario" / "knowledge" / deploy.SCENARIO.document_file).read_text(encoding="utf-8")
+        self.assertIn(title.splitlines()[0].removeprefix("# ").casefold(), deploy.SCENARIO.document_question.casefold())
         for fact in deploy.SCENARIO.expected_facts:
             self.assertIn(fact, deploy.SCENARIO.app_question)
         self.assertIn(deploy.SCENARIO.app_question, deploy.APP_NEXT)
         args = deploy.parse_arguments(["up"])
-        self.assertEqual((args.ontology_question, args.document_question),
-                         (deploy.SCENARIO.ontology_question, deploy.SCENARIO.document_question))
+        self.assertEqual((args.ontology_question, args.document_question, args.document_file),
+                         (deploy.SCENARIO.ontology_question, deploy.SCENARIO.document_question,
+                          deploy.SCENARIO.document_file))
 
     def test_the_agents_follow_the_contract(self):
         self.assertEqual(deploy.foundry.VARIANTS, {"with_iq": "agents/scenario-with-iq",
@@ -1100,7 +1119,8 @@ class NativeBootstrapTests(unittest.TestCase):
         ctx.args.bootstrap_fallback = "notebooks"
         ctx.http.add("POST", r"/items/bulkImportDefinitions$", reply(body=self.result))
         for item, job in RUNS:
-            ctx.http.add("GET", rf"/items/{item}/jobs/instances$", reply(body={"value": []}))
+            ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"),
+                                       [reply(body={"value": []})]))
             ctx.http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$",
                          reply(202, headers={"Location":
                              f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
@@ -1118,8 +1138,8 @@ class NativeBootstrapTests(unittest.TestCase):
 
     def jobs(self, ctx, *runs, completed=()):
         for item, job in runs:
-            ctx.http.add("GET", rf"/items/{item}/jobs/instances$",
-                         reply(body={"value": [{"id": job, "status": "Completed"}] if item in completed else []}))
+            ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"), [
+                reply(body={"value": [{"id": job, "status": "Completed"}] if item in completed else []})]))
             ctx.http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
                 "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
             ctx.http.add("GET", rf"/items/{item}/jobs/instances/{job}$", reply(body={"status": "Completed"}))
@@ -1192,6 +1212,31 @@ class NativeBootstrapTests(unittest.TestCase):
         self.assertIn(SIGNALS, signals)
         self.assertEqual(ctx.state.section("bootstrap")["jobs"][NAMES["seed"]]["id"], RERUN_JOB)
 
+    def test_the_document_publisher_runs_once_with_a_verified_binding_and_again_after_an_update(self):
+        ctx = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{KNOWLEDGE}/jobs/instances$"), [
+            reply(body={"value": []}), reply(body={"value": [{"id": KNOWLEDGE_JOB, "status": "Completed"}]})]))
+        ctx.http.add("POST", rf"/notebooks/{KNOWLEDGE}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
+            "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{KNOWLEDGE}/jobs/instances/{KNOWLEDGE_JOB}"}))
+        ctx.http.add("GET", rf"/items/{KNOWLEDGE}/jobs/instances/{KNOWLEDGE_JOB}$", reply(body={"status": "Completed"}))
+        # The plan did not run it: DEV has no completed run, and the verified binding runs no other notebook.
+        deploy.phase_bootstrap(ctx)
+        (url, body), = ctx.http.posts(r"/jobs/execute/instances")
+        self.assertIn(KNOWLEDGE, url)
+        parameters = next(step.parameters for step in deploy.SCENARIO.runs if step.item == "knowledge")
+        self.assertEqual(body["executionData"]["parameters"], deploy.notebook_parameters(parameters))
+        deploy.phase_bootstrap(ctx)
+        self.assertEqual(len(ctx.http.posts(r"/jobs/execute/instances")), 1, "a completed run is not repeated")
+        # A revised publisher runs again after its approved update, although DEV has a completed run.
+        self.change(ctx, f"{FOLDERS['knowledge']}/notebook-content.py")
+        approval = self.approval(ctx)
+        self.accept_updates(ctx)
+        ctx.args.approve = {"item-update": approval["sha256"][:12]}
+        self.assertIn(f"updated {NAMES['knowledge']}", deploy.phase_bootstrap(ctx))
+        runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
+        self.assertEqual((len(runs), KNOWLEDGE in runs[-1]), (2, True))
+        self.assertEqual(ctx.state.section("bootstrap")["native"]["rerun"], [])
+
     def test_lakehouse_definitions_are_never_replaced(self):
         ctx = self.context()
         deploy.phase_bootstrap(ctx)
@@ -1211,7 +1256,7 @@ class NativeBootstrapTests(unittest.TestCase):
         approval = self.approval(ctx)
         self.assertEqual(approval["summary"]["changes"], [{"action": "update", "address": f"Ontology {NAMES['ontology']}"}])
         self.accept_updates(ctx)
-        self.jobs(ctx, *RUNS, completed=(SEED, SIGNALS))
+        self.jobs(ctx, *RUNS, completed=(SEED, SIGNALS, KNOWLEDGE))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         self.assertIn(f"updated {NAMES['ontology']}", deploy.phase_bootstrap(ctx))
         (url, body), = ctx.http.posts(r"/updateDefinition")
@@ -1370,10 +1415,27 @@ class ReadinessTests(unittest.TestCase):
         wrong["references"][0]["ontologyId"] = LAKEHOUSE
         self.assertIn("no fabricOntology reference for the DEV workspace and ontology",
                       deploy.ontology_evidence(wrong, source, deploy.SCENARIO.expected_facts)[0])
-        snapshot = {"activity": [{"type": "indexedOneLake"}], "references": [{"type": "indexedOneLake"}]}
+        snapshot = {"activity": [{"type": "indexedOneLake"}], "references": [{"type": "indexedOneLake", "sourceData": {
+            "doc_url": onelake_document(deploy.SCENARIO.document_file)}}]}
         self.assertIn(f"no fabricOntology activity for {name}",
                       deploy.ontology_evidence(snapshot, source, deploy.SCENARIO.expected_facts)[0])
-        self.assertEqual(deploy.document_evidence(snapshot, "demo-documents")[0], [])
+        self.assertEqual(deploy.document_evidence(snapshot, "demo-documents", deploy.SCENARIO.document_file)[0], [])
+
+    def test_document_evidence_requires_a_passage_of_the_approved_document(self):
+        document = deploy.SCENARIO.document_file
+
+        def retrieved(*files):
+            return {"activity": [{"type": "indexedOneLake", "knowledgeSourceName": "docs"}],
+                    "references": [{"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document(name)}}
+                                   for name in files]}
+
+        self.assertEqual(deploy.document_evidence(retrieved("starter.txt", document), "docs", document),
+                         ([], {"activity": 1, "references": 2, "document": document}))
+        # Another file in the folder, such as the seeder's starter document, does not prove the approved one.
+        for files in (("starter.txt",), (f"draft-{document}",)):
+            with self.subTest(files=files):
+                self.assertEqual(deploy.document_evidence(retrieved(*files), "docs", document)[0],
+                                 [f"no indexedOneLake reference to {document}"])
 
     def test_verify_waits_for_every_folder_source_and_asks_each_question_of_its_own_base(self):
         sources = {"documents": "demo-documents", "manuals": "demo-manuals", "unattached": "demo-unattached"}
@@ -1409,6 +1471,11 @@ class ReadinessTests(unittest.TestCase):
                          (deploy.SCENARIO.document_question, "indexedOneLake", "demo-documents"))
         # Only the agents' minimal-effort knowledge base takes the question as a search intent.
         self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True])
+        # A passage of the starter document alone does not prove the approved document is indexed.
+        evaluate = retrieval.call_args_list[1].args[4]
+        self.assertEqual(evaluate({"activity": [{"type": "indexedOneLake"}], "references": [
+            {"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document("starter.txt")}}]})[0],
+            [f"no indexedOneLake reference to {deploy.SCENARIO.document_file}"])
         # Only Agent Service can use the project identity, so the runner checks the Web IQ wiring, not a search.
         self.assertEqual(web_iq.call_args.args[1:], ())
         self.assertIn("Web IQ wired", report)
@@ -1458,12 +1525,12 @@ class ReadinessTests(unittest.TestCase):
         http = FakeHttp()
         http.add("POST", r"/retrieve\?api-version=", reply(body={
             "activity": [{"type": "indexedOneLake", "knowledgeSourceName": "docs"}],
-            "references": [{"type": "indexedOneLake"}]}))
+            "references": [{"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document("policy-v1.md")}}]}))
         ctx = make_context(self, root, FakeShell([TOKEN_RULE]), http)
         evidence = deploy.prove_retrieval(
             ctx, "https://srch.search.windows.net/knowledgebases/kb/retrieve?api-version=x", "q",
             {"kind": "indexedOneLake", "knowledgeSourceName": "docs"},
-            lambda body: deploy.document_evidence(body, "docs"), intents=True)
+            lambda body: deploy.document_evidence(body, "docs", "policy-v1.md"), intents=True)
         _, _, body, _ = http.calls[0]
         self.assertEqual(body["intents"], [{"type": "semantic", "search": "q"}])
         self.assertNotIn("messages", body)

@@ -63,7 +63,7 @@ jobs:
         run: python -B .github/skills/deploy-platform/scripts/foundry_agent.py validate
       - name: Runtime preflight tests
         run: python -B -m unittest discover -s .github/skills/runtime-integration/tests
-      - name: Fabric notebook tests (offline binder and seeder)
+      - name: Fabric notebook tests (offline binder, seeder, signals and document publisher)
         run: python -B -m unittest discover -s .github/skills/fabric-workspace/tests
 
   app:

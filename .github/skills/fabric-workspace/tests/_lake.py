@@ -1,9 +1,9 @@
 """An in-memory lakehouse for the offline tests of the Books notebooks.
 
-The stand-ins implement only what SeedBooks and ComputeBookSignals call, with the semantics they rely on: typed
-schemas that refuse a value of the wrong type as Spark does (an int for a DOUBLE, a datetime for a DATE),
-errorifexists and overwrite writes, Delta's insert-only merge on the key columns, reads of a table's current rows,
-and notebookutils.fs files that are never overwritten and need their folder to exist.
+The stand-ins implement only what SeedBooks, ComputeBookSignals and PublishBooksKnowledge call, with the semantics
+they rely on: typed schemas that refuse a value of the wrong type as Spark does (an int for a DOUBLE, a datetime for
+a DATE), errorifexists and overwrite writes, Delta's insert-only merge on the key columns, reads of a table's current
+rows, and notebookutils.fs files that are never overwritten, need their folder to exist and read back as UTF-8.
 """
 
 import datetime
@@ -183,6 +183,10 @@ class Lake:
         self.files[path] = content
         self.log.append(("put", path))
         return True
+
+    def head(self, path, max_bytes):
+        """Up to the first max_bytes bytes of a file, decoded as UTF-8."""
+        return self.files[path].encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
 
     def rows(self, name):
         """A table's rows as dictionaries."""

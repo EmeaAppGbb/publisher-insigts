@@ -7,6 +7,7 @@ authors, imprints, printers, campaigns and figures. Never add a real title, auth
 | --- | --- | --- |
 | [`SeedBooks`](../../workspace/SeedBooks.Notebook/notebook-content.py) | The raw tables and `Files/documents/starter.txt` | A deterministic generator; insert-only by key, so existing rows and the file are never changed |
 | [`ComputeBookSignals`](../../workspace/ComputeBookSignals.Notebook/notebook-content.py) | The derived tables | Fixed rules over the raw tables; each run replaces the derived rows with the same rows for the same data |
+| [`PublishBooksKnowledge`](../../workspace/PublishBooksKnowledge.Notebook/notebook-content.py) | The approved documents in `Files/documents` | Insert-only: writes a missing file and never overwrites one; see the [approved documents](../knowledge/README.md) |
 | [`BooksOntology`](../../workspace/BooksOntology.Ontology) | Nothing | Maps seven tables to entities that Fabric IQ queries live, as the signed-in user |
 
 All tables are Delta tables in the `Books` lakehouse's `dbo` schema. Amounts are pounds, as whole pounds

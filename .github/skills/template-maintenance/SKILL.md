@@ -84,7 +84,8 @@ command as a template check; the runner refuses the template and its forks anywa
 check-then-act, resumable and gated: persist a receipt before polling any
 accepted mutation, and update `docs/development.md`.
 
-For the Fabric notebooks, run the offline binder and seeder tests:
+For the Fabric notebooks, run the offline binder, seeder, signal and document-publisher
+tests, which also run `embed_knowledge.py --check`:
 `python3 -B -m unittest discover -s .github/skills/fabric-workspace/tests`.
 
 For the app, run `npm ci`, `npm run lint`, `npm run build` and `npm test` from

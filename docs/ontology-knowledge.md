@@ -1,6 +1,6 @@
 # Seeded ontologies in Foundry IQ
 
-The repository includes a Git-owned **book portfolio ontology**, seeded lakehouse data, a notebook that derives the latest week's signals, a starter document and a deployment-plan action that binds them in the target workspace. Terraform registers the lakehouse's document folders as indexed knowledge sources of the agents' knowledge base, and this and additional DEV ontologies as live sources of a separate, **check-only** knowledge base.
+The repository includes a Git-owned **book portfolio ontology**, seeded lakehouse data, a notebook that derives the latest week's signals, a deployment-plan action that binds them in the target workspace, a starter document and a notebook that publishes the [approved documents](../scenario/knowledge/README.md). Terraform registers the lakehouse's document folders as indexed knowledge sources of the agents' knowledge base, and this and additional DEV ontologies as live sources of a separate, **check-only** knowledge base.
 
 This uses the native [`fabricOntology` knowledge source (preview)](https://learn.microsoft.com/azure/search/agentic-knowledge-source-how-to-fabric-ontology), not document export or a custom MCP proxy. The source queries Fabric at retrieval time; it doesn't create an index, copy table rows to Search, or use the folder sources' five-minute schedule.
 
@@ -33,7 +33,7 @@ The [data contract](../scenario/data/README.md) defines every table, key and rul
 
 The [`Bootstrap` plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) runs this sequence:
 
-1. Deploy `Books`, then deploy and execute `SeedBooks` to insert missing fictional rows and `Files/documents/starter.txt`, the document the default `documents` folder source indexes.
+1. Deploy `Books`, then deploy and execute `SeedBooks` to insert missing fictional rows and `Files/documents/starter.txt`, in the folder the default `documents` folder source indexes. `PublishBooksKnowledge`, which depends only on `Books`, writes the [approved documents](../scenario/knowledge/README.md) there too.
 2. Deploy and execute `ComputeBookSignals`, which replaces the three derived tables with the latest week's signals, decision options and title performance.
 3. Deploy `BooksOntology` with its entities, properties and relationships.
 4. Deploy and execute `BindBooks`. It resolves both items in the **current workspace**, waits for the lakehouse's SQL analytics endpoint, refreshes SQL metadata for only the seven ontology tables, and checks every per-table result.
@@ -105,7 +105,7 @@ Each entry becomes the `indexedOneLake` source `<project>-<key>`, which indexes
 reads, and checks it for changes every five minutes with the embedding model. Give
 `target_path` without a `Files/` prefix or surrounding slashes: `documents` indexes
 `Files/documents`. The default is one attached folder, `documents`, described as
-"Starter documents", which holds `starter.txt`.
+"Starter documents", which holds `starter.txt` and the [approved documents](../scenario/knowledge/README.md).
 
 - `attach = true` adds the source to the agents' knowledge base. A detached source is
   still created and indexed, so someone in `knowledge_editor_principal_ids`, who gets

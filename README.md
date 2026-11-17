@@ -15,8 +15,8 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 - **Azure:** resource group, Fabric capacity, container registry, Log Analytics and Application Insights (Entra ID only, no ingestion key), and a Container Apps environment with the web app.
 - **Identity/access:** Entra deployment app/service principal, delegated scopes, authorized clients, the web app's single-page sign-in registration, the Work IQ registration only with Work IQ, managed identities and role assignments.
 - **Fabric:** DEV/TEST workspaces and DEV-to-TEST deployment pipeline; GitHub credentials connection only with Git synchronization enabled.
-- **DEV items:** `Books` lakehouse, `SeedBooks`, `ComputeBookSignals`, `BooksOntology`, `BindBooks` and `Bootstrap` deployment plan.
-- **Seed data:** a fictional book portfolio: 8 titles, 18 editions, 26 weeks of sales, stock, public signals and campaigns, the latest week's signals and decision options computed from them, and `Files/documents/starter.txt` ([data contract](scenario/data/README.md)).
+- **DEV items:** `Books` lakehouse, `SeedBooks`, `ComputeBookSignals`, `BooksOntology`, `BindBooks`, `PublishBooksKnowledge` and `Bootstrap` deployment plan.
+- **Seed data:** a fictional book portfolio: 8 titles, 18 editions, 26 weeks of sales, stock, public signals and campaigns, the latest week's signals and decision options computed from them, and `Files/documents/starter.txt` ([data contract](scenario/data/README.md)), with the six [approved documents](scenario/knowledge/README.md), such as the reprint and stock policy, published beside it.
 - **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, keyless Web IQ, Fabric IQ, Application Insights and, only with Work IQ, Work IQ connections.
 - **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, and a check-only knowledge base with the live ontology source.
 - **Web IQ:** global G3 account, called keyless as the Foundry project identity; linking the AppID and binding that identity in the portal is manual.
@@ -29,10 +29,10 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 | Path | Contains |
 | --- | --- |
 | [`infra/`](infra/) | Terraform: Entra, Fabric, Foundry, Search, Web IQ, optional Work IQ, knowledge registration, the agents' connections and the app's hosting. |
-| [`workspace/`](workspace/) | Fabric items: lakehouse, seed and bind notebooks, ontology and bootstrap plan. |
+| [`workspace/`](workspace/) | Fabric items: lakehouse, seed, signal, bind and document-publishing notebooks, ontology and bootstrap plan. |
 | [`agents/`](agents/README.md) | The two Foundry prompt agent variants: shared `agent.json` and `instructions.md`, and the with-IQ variant's `tools/`. |
 | [`app/`](app/README.md) | The Container Apps web app: the React page, the Node server that verifies each user's token and asks the agents, and its image. |
-| [`scenario/`](scenario/data/README.md) | The book performance scenario: its data contract, and later its documents, workflow rules and evaluations ([contract](docs/scenario-authoring.md)). |
+| [`scenario/`](scenario/data/README.md) | The book performance scenario: its data contract and [approved documents](scenario/knowledge/README.md), and later its workflow rules and evaluations ([contract](docs/scenario-authoring.md)). |
 | [`cicd/`](cicd/README.md) | Native Fabric bootstrap and promotion. |
 | [`docs/`](docs/getting-started.md) | Guides, starting with getting started. |
 | [`.github/skills/`](.github/skills/) | Copilot skills that run each workflow. |

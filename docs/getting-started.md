@@ -90,7 +90,7 @@ lists every phase, approval and flag.
 
 ## 1. Create your repository
 
-On GitHub, select **Use this template > Create a new repository**, then open **that repository** in Codespaces or clone it locally. Keep the five item folders under `workspace/`, including their `.platform` logical IDs: these are portable identities, not someone else's deployment bindings. The notebooks resolve physical bindings in each target workspace. Select your new repository's published bootstrap branch and `/workspace` directory; do not select an unpublished Copilot worktree branch. Push any customization to the selected branch before synchronizing Fabric. Replace the template's code owners and contribution, conduct, security and support policies with your own, and keep its MIT license notice ([what gets templated](development.md#what-gets-templated)).
+On GitHub, select **Use this template > Create a new repository**, then open **that repository** in Codespaces or clone it locally. Keep every item folder under `workspace/`, including the `.platform` logical IDs: these are portable identities, not someone else's deployment bindings. The notebooks resolve physical bindings in each target workspace. Select your new repository's published bootstrap branch and `/workspace` directory; do not select an unpublished Copilot worktree branch. Push any customization to the selected branch before synchronizing Fabric. Replace the template's code owners and contribution, conduct, security and support policies with your own, and keep its MIT license notice ([what gets templated](development.md#what-gets-templated)).
 
 ## 2. Configure
 
@@ -265,21 +265,28 @@ reviewed, published `workspace/` definitions through Fabric's **Bulk Import Item
 Definitions** API and attaches `Bootstrap`. It uses the signed-in Azure user,
 not a PAT, and does not connect Fabric to GitHub.
 
-All six items are included: `Books`, `SeedBooks`, `ComputeBookSignals`,
-`BooksOntology`, `BindBooks` and `Bootstrap`. The plan deploys the lakehouse, runs
-the seeder and the signal notebook, deploys the ontology, then runs its binder. The runner resumes accepted
-operations, checks every imported item and never overwrites existing definitions.
-If plan attachment is unavailable, it stops for explicit
+Every item in `workspace/` is included: `Books`, `SeedBooks`, `ComputeBookSignals`,
+`BooksOntology`, `BindBooks`, `PublishBooksKnowledge` and `Bootstrap`. The plan
+deploys the lakehouse, runs the seeder and the signal notebook, deploys the ontology,
+then runs its binder; separately, after the lakehouse, it runs `PublishBooksKnowledge`.
+The runner resumes accepted operations, checks every imported item and never
+overwrites existing definitions. It also runs `PublishBooksKnowledge` whenever DEV
+has no completed run of it. To add that notebook to a DEV bootstrapped without it,
+rerun with `--update-definitions` and approve the changed plan (below); the runner
+imports the missing notebook with the plan attached, then runs it unless the plan
+already did. If plan attachment is unavailable, it stops for explicit
 `--bootstrap-fallback notebooks` approval before importing and running the
 notebooks separately.
 
 The seeder creates the fictional book portfolio's tables, such as `dbo.titles` (8 rows) and `dbo.weekly_sales` (26 weeks), and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes; `ComputeBookSignals` then derives the latest week's `dbo.title_signals`, `dbo.decision_options` and `dbo.title_performance` ([data contract](../scenario/data/README.md)). Both resolve `Books` in the **current workspace**, use GUID-based OneLake paths, and require no default lakehouse attachment. Seeder reruns only insert missing demo keys and create the file if absent; they do not overwrite edits or delete other data. Run one seeder per workspace at a time. It refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled.
 
+`PublishBooksKnowledge` writes the six [approved documents](../scenario/knowledge/README.md), embedded with their reviewed SHA-256 digests, beside `starter.txt`. It resolves `Books` the same way and, like the seeder, refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled. It is insert-only: it writes a missing file, leaves an identical one alone, refuses before writing anything when an existing file holds different content, and reads every file back. Publish a revision under a new versioned file name; the `documents` source indexes new files on its next five-minute run.
+
 Run `BindBooks` as an **authorized Fabric user**: service-principal NotebookUtils tokens have restricted scopes. It refreshes the seven ontology tables' SQL metadata and binds the books ontology to this workspace's lakehouse through its SQL analytics endpoint, with every `ONT_*` source pin; Fabric keeps the pins only in that form, and graph materialization needs them ([binding](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint)). The runner then checks the binding and records the **physical lakehouse and ontology GUIDs**, not the logical IDs in `.platform`. Review the generated DEV binding before promotion. By hand, copy the GUIDs the binder prints and confirm the files/tables and a data-backed ontology query in Fabric before continuing.
 
 | Case | Flag |
 | --- | --- |
-| The tenant rejects plan attachment (`FeatureNotAvailable`) | `--bootstrap-fallback notebooks` imports without the plan, then runs `SeedBooks`, `ComputeBookSignals` and `BindBooks` in order. Never change a tenant setting instead. |
+| The tenant rejects plan attachment (`FeatureNotAvailable`) | `--bootstrap-fallback notebooks` imports without the plan, then runs `SeedBooks`, `ComputeBookSignals`, `BindBooks` and `PublishBooksKnowledge` in order. Never change a tenant setting instead. |
 | A deployed notebook, ontology or plan differs from the checkout | `--update-definitions`. Review each printed `git diff` command, then approve with `--approve item-update=<sha12>`; `--yes` cannot. Lakehouses are never replaced, and updated bootstrap notebooks, with the notebooks that read their output, run again before the binding is re-verified. |
 | An import or notebook run failed | Inspect and fix the cause, then rerun with `--retry-failed`. |
 
@@ -288,8 +295,8 @@ Run `BindBooks` as an **authorized Fabric user**: service-principal NotebookUtil
 With `fabric_git_enabled = true`, the runner uses the existing Git bootstrap
 instead. For manual setup, open DEV's Git integration settings, use
 `github_connect_request` and `github_connection_id`, then choose **Connect and
-sync with deployment plan** and the incoming **Bootstrap** plan. Include all
-five items. Review and commit generated DEV bindings through Fabric source
+sync with deployment plan** and the incoming **Bootstrap** plan. Include every
+item in `workspace/`. Review and commit generated DEV bindings through Fabric source
 control before promotion.
 
 For API automation and promotion, see [`cicd/`](../cicd/README.md). For binding details, see [seeded ontologies](ontology-knowledge.md). Both bootstrap paths run outside Terraform.
@@ -422,7 +429,7 @@ The `verify` phase then proves **DEV ready** with your own Search token, never a
 
 - Every folder source, attached or not, has ingested its folder.
 - Live ontology retrieval through the check-only knowledge base returns `fabricOntology` activity and references for DEV's workspace and ontology, with **The Glass Orchard** and **Forecast variance** in the live source data (or your `--expect` facts). An answer from a document does not count.
-- Document retrieval from the agents' knowledge base cites the `documents` source. That base runs at minimal effort, so `verify` sends the question as a search intent.
+- Document retrieval from the agents' knowledge base returns `indexedOneLake` activity and a reference from the `documents` source to the approved reprint and stock policy, `bks-pol-001-reprint-and-stock-policy-v1.md` (or your `--document-question` and `--document-file`); a `starter.txt` passage alone does not count. That base runs at minimal effort, so `verify` sends the question as a search intent. A newly published file waits for the source's next five-minute indexing run, so this retrieval retries for about six minutes.
 - Web IQ's account is provisioned, the `web-iq` connection calls its MCP server as the project identity with no key, and you confirmed binding that identity to its AppID (`--web-iq-bound`). No Web IQ call is made, so its retrieval stays unverified until the app.
 - With Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection exist; no Work IQ call is made.
 

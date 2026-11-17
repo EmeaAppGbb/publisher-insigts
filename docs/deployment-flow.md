@@ -16,7 +16,7 @@ The diagram's Git-sync step is opt-in; the default uses native Fabric import wit
 | 2 | Prepare deployment identity | Review and approve the saved **Entra-only** plan. This initial bootstrap is the only plan allowed to target `module.fabric_user_auth`. Registration alone is not consent or Fabric readiness. |
 | 3 | Consent and sign in | Consent covers exactly the declared delegated scopes. The runner grants it as you, assuming you are an administrator; another administrator grants it only if Entra refuses. The deployment-scope token is acquired silently where possible; verify the delegated scopes and actual Fabric roles. Terraform does not grant consent. |
 | 4 | Provision the platform | Review and approve the saved **full, untargeted** plan. It creates capacity, empty DEV/TEST workspaces, deployment pipeline, Foundry with its `agent`, `chat` and `embedding` models, Search, Web IQ, monitoring and the app's hosting (registry, Container Apps environment, app identity and sign-in registration); the Git connection and, with `work_iq_enabled`, the Work IQ registration and connection are opt-in. Search's system identity is enabled after creation and granted by the knowledge plan. Bootstrap and knowledge setup are still pending. |
-| 5 | Import DEV and run Bootstrap | Import the reviewed definitions through native Fabric APIs with `Bootstrap` attached. Git sync is the opt-in alternative. Include all five starter items and wait for the operation and notebook actions. Replacing a changed notebook, ontology or plan needs `--update-definitions` and an `item-update` approval. |
+| 5 | Import DEV and run Bootstrap | Import the reviewed definitions through native Fabric APIs with `Bootstrap` attached. Git sync is the opt-in alternative. Include every item in `workspace/` and wait for the operation and notebook actions. Replacing a changed notebook, ontology or plan needs `--update-definitions` and an `item-update` approval. |
 | 6 | Check bindings and discover IDs | Confirm files, tables, the target-local SQL-endpoint binding with its `ONT_*` pins and a data-backed Fabric query. Discover the physical DEV lakehouse and ontology GUIDs, not `.platform` logical IDs. Review generated bindings before promotion; commit through source control when Git is enabled. |
 | 7 | Wire knowledge | Put the verified physical IDs into the **same** tfvars file. Review and approve the saved **full, untargeted** knowledge plan: one source per knowledge folder, the agents' knowledge base, the check-only ontology base and the agents' connections, including the keyless `web-iq` connection to Web IQ. |
 | 8 | Prove retrieval | Wait for every folder's ingestion. Verify document retrieval separately from live ontology retrieval, including `fabricOntology` activity/references and the required end-user token, then the Web IQ account and its keyless `web-iq` connection, without a Web IQ call, and your confirmation that the project identity is bound to the AppID (`--web-iq-bound`). Web IQ retrieval stays unverified until the app. With Work IQ, the runner grants `WorkIQAgent.Ask` and checks the connection, without a Work IQ call. |
@@ -29,19 +29,20 @@ The [deterministic runner](development.md#deploy-deterministically) executes the
 
 ## What Bootstrap does
 
-The [`Bootstrap` deployment plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) orders five groups:
+The [`Bootstrap` deployment plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) orders six groups:
 
 1. Deploy the `Books` lakehouse.
 2. Deploy and execute `SeedBooks` to insert missing fictional book rows and create `Files/documents/starter.txt` if absent.
 3. Deploy and execute `ComputeBookSignals` to compute the latest week's signals, decision options and title performance.
 4. Deploy `BooksOntology` with its seven entities and their relationships.
 5. Deploy and execute `BindBooks` to refresh scoped SQL metadata, bind to the target lakehouse through its SQL analytics endpoint, and expose the physical IDs needed for knowledge setup.
+6. Deploy and execute `PublishBooksKnowledge` after the lakehouse, independently of steps 2-5, to write the [approved documents](../scenario/knowledge/README.md) beside `starter.txt` without overwriting any file.
 
-The plan itself is the sixth selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing seeded rows and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) shows the template's original four groups and the promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
+The plan itself is also a selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing seeded rows and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) shows the template's original four groups and the promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
 
 ## Where this flow stops
 
-A successful Terraform apply, notebook run, source registration or agent publication is not proof of query readiness. For the sample flow, verify both documents and live ontology data; an answer copied from `starter.txt` is not evidence of live ontology retrieval.
+A successful Terraform apply, notebook run, source registration or agent publication is not proof of query readiness. For the sample flow, verify both the approved documents and live ontology data: document retrieval must reference the approved reprint policy, not only `starter.txt`, and an answer copied from a document is not evidence of live ontology retrieval.
 
 The guided flow leaves TEST empty. It does not create PROD, grant other users access to the agents and app, or verify a second user's isolation. Those are separate, explicit tasks. See [runtime integration](runtime-integration.md) and [promotion to TEST and PROD](../cicd/README.md#promoting-through-test-and-prod).
 

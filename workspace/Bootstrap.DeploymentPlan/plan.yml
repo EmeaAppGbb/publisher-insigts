@@ -47,3 +47,17 @@ groups:
               value: Books
             - name: ontology_name
               value: BooksOntology
+  - name: PublishBooksKnowledge
+    logicalId: 7e20d9b3-f69a-4e6d-af75-74a459e2ccc0
+    dependsOn:
+      - groupName: Books
+    postActions:
+      - name: Publish the approved documents
+        job:
+          type: Execute
+          logicalId: 7e20d9b3-f69a-4e6d-af75-74a459e2ccc0
+          parameters:
+            - name: lakehouse_name
+              value: Books
+            - name: allow_other_workspaces
+              value: false

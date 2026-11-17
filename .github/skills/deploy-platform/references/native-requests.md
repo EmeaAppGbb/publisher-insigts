@@ -137,8 +137,9 @@ and `operationStatus: Succeeded`. Missing results, `Failed` and
 `SucceededDespiteFailures` block readiness.
 
 Only an explicit `--bootstrap-fallback notebooks` permits retrying a
-`FeatureNotAvailable` plan rejection without the plan. The runner then runs the
-existing seed/bind checks. A timeout or missing receipt is not permission to
+`FeatureNotAvailable` plan rejection without the plan. The runner then runs
+`SeedBooks`, `ComputeBookSignals`, `BindBooks` and `PublishBooksKnowledge` as the
+user, with their existing checks. A timeout or missing receipt is not permission to
 resubmit an import.
 
 ### Update deployed definitions
@@ -286,7 +287,7 @@ Send the ontology question to the **check-only** knowledge base's `retrieve` URL
 
 Require a successful `activity` entry of type `fabricOntology`, a `references` entry of the same type with matching DEV `workspaceId`/`ontologyId`, and `sourceData.fabricRawData` grounded in the bound tables. A document-only answer is a failed ontology check.
 
-Check the indexed folder sources separately, through the agents' knowledge base's `retrieve` URL, with the starter-document question and the `documents` source name from `knowledge_source_names`. That knowledge base runs at minimal retrieval effort, which refuses `messages`: send the question as a search intent, `{"intents": [{"type": "semantic", "search": "<question>"}]}`. Its parameter discriminator is `kind: "indexedOneLake"`, not `searchIndex`; request references/source data there too. Require successful ingestion and a reference from that source. Preserve denied/failed-source errors instead of accepting partial answers as fully ready. Never persist either token in config, state, request JSON or logs.
+Check the indexed folder sources separately, through the agents' knowledge base's `retrieve` URL, with the approved-document question (`--document-question`) and the `documents` source name from `knowledge_source_names`. That knowledge base runs at minimal retrieval effort, which refuses `messages`: send the question as a search intent, `{"intents": [{"type": "semantic", "search": "<question>"}]}`. Its parameter discriminator is `kind: "indexedOneLake"`, not `searchIndex`; request references/source data there too. Require successful ingestion, error-free `indexedOneLake` activity for that source and an `indexedOneLake` reference whose `sourceData.doc_url` names the approved document, `bks-pol-001-reprint-and-stock-policy-v1.md` by default (`--document-file`); a `starter.txt` passage alone does not prove the approved documents are indexed. A newly published file waits for the source's next five-minute indexing run, so the runner retries this retrieval for about six minutes (seven attempts, 60 seconds apart). Preserve denied/failed-source errors instead of accepting partial answers as fully ready. Never persist either token in config, state, request JSON or logs.
 
 Web IQ isn't a knowledge source: the agents call its MCP server through the `web-iq` connection as the project identity, which neither you nor the runner can use. Read the connection instead, `GET https://management.azure.com{foundry_project_id}/connections/{web_iq.connection_name}?api-version=2025-10-01-preview`: require `properties.category` `RemoteTool`, `authType` `ProjectManagedIdentity`, `target` equal to the `web_iq` output's `mcp_endpoint` and `audience` `https://api.microsoft.ai`. Only an agent's cited public-context line proves retrieval.
 

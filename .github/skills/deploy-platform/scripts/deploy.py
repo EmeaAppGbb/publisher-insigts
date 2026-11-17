@@ -135,11 +135,15 @@ SEARCH_DEFERRED = {"search_identity_ready": "false"}
 
 class NotebookRun(NamedTuple):
     """A bootstrap notebook (an item key in Scenario.items), its parameters, whether a completed run suffices and the
-    earlier notebooks whose output it reads, so it runs again after any of them does."""
+    earlier notebooks whose output it reads, so it runs again after any of them does.
+
+    A binding-chain notebook runs while the ontology binding is unverified. Any other runs whenever DEV has no
+    completed run of it, so one added after the first bootstrap still runs once. Each runs again after an update."""
     item: str
     parameters: dict
     skip_completed: bool
     reads: tuple = ()
+    binding_chain: bool = True
 
 
 class Scenario(NamedTuple):
@@ -158,9 +162,11 @@ class Scenario(NamedTuple):
     runs: tuple
     # Asked of the ontology's check-only knowledge base, which holds the live ontology source.
     ontology_question: str
-    # Asked of the agents' knowledge base, retrieving from the indexed OneLake folder source document_source names.
+    # Asked of the agents' knowledge base, retrieving from the indexed OneLake folder source document_source names;
+    # a passage of the approved document document_file must answer it.
     document_question: str
     document_source: str
+    document_file: str
     expected_facts: tuple
     app_question: str
 
@@ -168,7 +174,7 @@ class Scenario(NamedTuple):
 SCENARIO = Scenario(
     items=(("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
            ("signals", "Notebook", "ComputeBookSignals"), ("ontology", "Ontology", "BooksOntology"),
-           ("bind", "Notebook", "BindBooks")),
+           ("bind", "Notebook", "BindBooks"), ("knowledge", "Notebook", "PublishBooksKnowledge")),
     plan="Bootstrap",
     registration="scenario",
     registration_description=("Current book performance: titles, editions, campaigns, the latest week's signals and "
@@ -178,14 +184,18 @@ SCENARIO = Scenario(
     expression="BooksLakehouse",
     runs=(NotebookRun("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
           NotebookRun("signals", {"lakehouse_name": "Books"}, True, ("seed",)),
-          NotebookRun("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False)),
+          NotebookRun("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
+          NotebookRun("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True,
+                      binding_chain=False)),
     # The value is quoted: unquoted, Fabric sometimes read a bare value as an empty one and found nothing.
     ontology_question=("Using the live BooksOntology, which TitleSignal rows have the IsMaterial value \"Yes\"? "
                        "Return each signal's TitleName and SignalType."),
-    document_question=("According to the indexed starter document, what does Git store, what do SeedBooks and "
-                       "ComputeBookSignals write, and which source should be used for current sales, stock and "
-                       "signals? Answer from the OneLake document and cite it."),
+    document_question=("According to the approved reprint and stock policy, how many days of cover should a reprint "
+                       "leave after it lands, and at what net revenue at risk does an inventory risk become material? "
+                       "Answer from the OneLake document and cite its section."),
     document_source="documents",
+    # PublishBooksKnowledge writes it to the documents folder; a starter.txt passage does not prove it is indexed.
+    document_file="bks-pol-001-reprint-and-stock-policy-v1.md",
     # Computed rows: the live ontology source must return them in its own source data, not only the starter document.
     # They hold for the seeded weeks and after the demo advances a week.
     expected_facts=("The Glass Orchard", "Forecast variance"),
@@ -2512,18 +2522,19 @@ def phase_bootstrap(ctx):
     ids = resolve_items(ctx, workspace)
     problems = live_binding(ctx, workspace, ids, expected)
     rerun = list(native.get("rerun", ()))
+    if problems:
+        ctx.log("Binding not verified yet (" + "; ".join(problems) + "); running the bootstrap notebooks.")
+    for step in SCENARIO.runs:
+        name = scenario_name(step.item)
+        # Any other notebook is checked on every run: run_notebook skips it once DEV has a completed run of it.
+        if step.binding_chain and not (problems or name in rerun):
+            continue
+        run_notebook(ctx, workspace, ids[step.item], name, receipts, parameters=step.parameters,
+                     skip_completed=step.skip_completed and name not in rerun)
+        if name in rerun:
+            native["rerun"].remove(name)
+            ctx.state.save()
     if problems or rerun:
-        if problems:
-            ctx.log("Binding not verified yet (" + "; ".join(problems) + "); running the bootstrap notebooks.")
-        for step in SCENARIO.runs:
-            name = scenario_name(step.item)
-            if not (problems or name in rerun):
-                continue
-            run_notebook(ctx, workspace, ids[step.item], name, receipts, parameters=step.parameters,
-                         skip_completed=step.skip_completed and name not in rerun)
-            if name in rerun:
-                native["rerun"].remove(name)
-                ctx.state.save()
         problems = live_binding(ctx, workspace, ids, expected)
         if problems:
             raise Blocked("The bootstrap notebooks completed, but the binding is not verified: " + "; ".join(problems))
@@ -2708,7 +2719,13 @@ def ontology_evidence(body, source, facts):
     return problems, {"activity": len(activity), "references": len(references), "facts": list(facts)}
 
 
-def document_evidence(body, name):
+def document_name(reference):
+    """The file name of an indexedOneLake reference's OneLake doc_url."""
+    url = str((reference.get("sourceData") or {}).get("doc_url") or "")
+    return urllib.parse.unquote(urllib.parse.urlsplit(url).path).rsplit("/", 1)[-1]
+
+
+def document_evidence(body, name, document):
     problems = []
     activity = [entry for entry in body.get("activity") or [] if entry.get("type") == "indexedOneLake"
                 and entry.get("knowledgeSourceName") in (None, name)]
@@ -2719,7 +2736,9 @@ def document_evidence(body, name):
         problems.append("the indexedOneLake activity reported an error")
     if not references:
         problems.append("no indexedOneLake reference")
-    return problems, {"activity": len(activity), "references": len(references)}
+    elif not any(document_name(entry) == document for entry in references):
+        problems.append(f"no indexedOneLake reference to {document}")
+    return problems, {"activity": len(activity), "references": len(references), "document": document}
 
 
 def save_evidence(ctx, name, body):
@@ -2733,7 +2752,7 @@ def save_evidence(ctx, name, body):
     return path.relative_to(ctx.root)
 
 
-def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intents=False):
+def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intents=False, delay=20):
     """Read-only retrieval with bounded retries; assert structured evidence, never answer text.
 
     A knowledge base at minimal reasoning effort refuses messages: it takes the question as a search intent."""
@@ -2756,9 +2775,9 @@ def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intent
                 raise error
             problems = [error.message]
         ctx.log(f"Retrieval attempt {attempt} did not prove {parameters['kind']}: {'; '.join(problems)}.")
-        if attempt == attempts or ctx.remaining() < 60:
+        if attempt == attempts or ctx.remaining() < delay + 40:
             break
-        ctx.sleep(20)
+        ctx.sleep(delay)
     saved = f"Inspect the last response: {save_evidence(ctx, parameters['kind'] + '-failed', last)}" if last else None
     raise Blocked(f"{parameters['kind']} retrieval is not verified: {'; '.join(problems)}", saved,
                   "Check the knowledge source, your Fabric and Search data access, and RBAC propagation.",
@@ -2870,12 +2889,13 @@ def phase_verify(ctx):
         "kind": "fabricOntology", "knowledgeSourceName": source["knowledge_source_name"],
         "includeReferences": True, "includeReferenceSourceData": True},
         lambda body: ontology_evidence(body, source, facts))
-    # The agents' knowledge base runs at minimal effort, so the question goes in as a search intent.
+    # The agents' knowledge base runs at minimal effort, so the question goes in as a search intent. A newly published
+    # document waits for its source's next five-minute indexing run, so this retrieval retries for about six minutes.
     document = prove_retrieval(ctx, knowledge_url(endpoint, "knowledgebases", base, "retrieve", version),
                                ctx.args.document_question, {
         "kind": "indexedOneLake", "knowledgeSourceName": documents,
         "includeReferences": True, "includeReferenceSourceData": True},
-        lambda body: document_evidence(body, documents), intents=True)
+        lambda body: document_evidence(body, documents, ctx.args.document_file), intents=True, attempts=7, delay=60)
     web_iq = verify_web_iq(ctx)
     work_iq = verify_work_iq(ctx)
     ctx.state.section("verify").update(dev_ready_at=utc_now(), ingestion=ingestion, ontology=ontology, documents=document,
@@ -3661,7 +3681,8 @@ def parse_arguments(argv):
     group.add_argument("--consent-confirmed", action="store_true",
                        help="an administrator confirmed consent and this sign-in cannot read grants to verify it")
     group.add_argument("--bootstrap-fallback", choices=("notebooks",),
-                       help="if plan attachment is FeatureNotAvailable, import/sync without it and run Seed then Bind")
+                       help="if plan attachment is FeatureNotAvailable, import/sync without it and run the bootstrap "
+                            "notebooks as you")
     group.add_argument("--update-definitions", action="store_true",
                        help="replace changed definitions of deployed notebooks, ontologies and deployment plans "
                             "after an exact item-update approval (native import only; never lakehouses)")
@@ -3671,6 +3692,8 @@ def parse_arguments(argv):
     group = deployment.add_argument_group("readiness evidence")
     group.add_argument("--ontology-question", default=SCENARIO.ontology_question)
     group.add_argument("--document-question", default=SCENARIO.document_question)
+    group.add_argument("--document-file", default=SCENARIO.document_file,
+                       help="file name in the documents folder whose passage must answer --document-question")
     group.add_argument("--expect", action="append", help="fact required in live ontology source data (repeatable)")
     parser = Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True, parser_class=Parser)

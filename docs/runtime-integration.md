@@ -407,7 +407,7 @@ tool consent.
 
 | Gate | Required evidence | Checked by |
 | --- | --- | --- |
-| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`The Glass Orchard`, `Forecast variance`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge`; the Web IQ account and its keyless `web-iq` wiring, with your `--web-iq-bound` confirmation (no Web IQ call); with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
+| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`The Glass Orchard`, `Forecast variance`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge` to the approved reprint policy (or your `--document-file`); the Web IQ account and its keyless `web-iq` wiring, with your `--web-iq-bound` confirmation (no Web IQ call); with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
 | Agents | Each agent's latest version carries the reviewed definition's digest | `agent` phase |
 | App | `/healthz` answers 200, and `/api/config` serves this deployment's client ID | `app` phase |
 | Browser sign-in | A person signs in at the app URL, asks with IQ and without, and continues with a follow-up | You |

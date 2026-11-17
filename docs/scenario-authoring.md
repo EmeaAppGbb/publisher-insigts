@@ -111,7 +111,8 @@ native sync plus explicit notebook execution path. Never silently omit actions.
 
 The current [seeder](../workspace/SeedBooks.Notebook/notebook-content.py),
 [signal notebook](../workspace/ComputeBookSignals.Notebook/notebook-content.py),
-[binder](../workspace/BindBooks.Notebook/notebook-content.py) and
+[binder](../workspace/BindBooks.Notebook/notebook-content.py),
+[document publisher](../workspace/PublishBooksKnowledge.Notebook/notebook-content.py) and
 [plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) demonstrate the safety
 contract. Their books-specific identity/mapping checks are not a generic
 rewriter for another domain.
@@ -125,7 +126,11 @@ indexes or create duplicate registrations from an authoring plugin.
 
 Store authoritative text in `scenario/knowledge/`. A native
 `Publish<Domain>Knowledge.Notebook` publishes only its reviewed bytes, verifies
-readback and rejects conflicting content rather than overwriting it. Keep
+readback and rejects conflicting content rather than overwriting it.
+[`PublishBooksKnowledge`](../workspace/PublishBooksKnowledge.Notebook/notebook-content.py)
+is the implemented example: [`embed_knowledge.py`](../.github/skills/fabric-workspace/scripts/embed_knowledge.py)
+embeds each [approved document](../scenario/knowledge/README.md) with its SHA-256,
+and a revision gets a new versioned file name. Keep
 document IDs, versions, effective periods and authority policy explicit.
 
 OneLake indexing consumes **Files**, not Delta Tables. Register the physical DEV
