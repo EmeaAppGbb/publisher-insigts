@@ -39,7 +39,8 @@ resource "restful_resource" "public_context_source" {
 
   path            = "/knowledgesources/${local.public_context_source_name}"
   check_existance = true
-  force_new_attrs = ["name", "kind"]
+  # Search fixes an MCP source's authentication identity at creation, so a change recreates the source.
+  force_new_attrs = ["name", "kind", "mcpServerParameters.authentication"]
 
   body = {
     name              = local.public_context_source_name

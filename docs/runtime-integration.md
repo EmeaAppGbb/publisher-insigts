@@ -285,6 +285,8 @@ the only format the account allows.
   account's AppID, and returns HTTP 401 until then. Only Agent Service resolves the
   connection, so a direct retrieval from the base, the runner's or a portal test's,
   can't authenticate. A recreated Foundry project has a new identity to bind.
+  Search fixes a source's authentication at creation, so changing it recreates the
+  source and its knowledge base.
 - **Public-only queries.** The identity is the project's, not the user's, so only
   instructions keep private data out: the tool description and the base's retrieval
   instructions allow public, general context, such as a manufacturer's guidance
