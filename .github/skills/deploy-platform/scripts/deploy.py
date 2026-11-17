@@ -1534,7 +1534,9 @@ def check_search_tier(ctx, subscription, values):
     location, sku = values["search_location"] or values["location"], values["search_sku"]
     result = run(ctx, ["az", "rest", "--method", "post", "--url", SEARCH_OFFERINGS, "--only-show-errors", "--output", "json"])
     try:
-        regions = {region.get("regionName"): {offer.get("name") for offer in region.get("skus") or []}
+        # Each offer names its tier in sku.name, with the tier's limits beside it.
+        regions = {region.get("regionName"): {(offer.get("sku") or {}).get("name") or offer.get("name")
+                                              for offer in region.get("skus") or []}
                    for region in json.loads(result.stdout or "{}").get("regions") or []}
     except (ValueError, AttributeError):
         regions = {}

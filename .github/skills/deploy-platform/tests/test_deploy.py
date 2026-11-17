@@ -1536,8 +1536,10 @@ class ReadinessTests(unittest.TestCase):
 
 SEARCH_URL = ("https://management.azure.com/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Search"
               "/searchServices/srch-demo?api-version=2026-09-01-preview")
-OFFERINGS = {"regions": [{"regionName": "centralus", "skus": [{"name": "basic"}, {"name": "serverless"}]},
-                         {"regionName": "westeurope", "skus": [{"name": "basic"}]}]}
+# As fetchOfferings returns them: each tier's name in sku.name, beside its limits.
+OFFERINGS = {"regions": [{"regionName": "centralus", "skus": [{"sku": {"name": "basic"}, "limits": {"indexes": 15}},
+                                                           {"sku": {"name": "serverless"}, "limits": {}}]},
+                         {"regionName": "westeurope", "skus": [{"sku": {"name": "basic"}, "limits": {"indexes": 15}}]}]}
 
 
 def search_service(principal=None, state="Succeeded", status="running"):
