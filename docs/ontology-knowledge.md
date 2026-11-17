@@ -95,7 +95,7 @@ knowledge_ontologies = {
 }
 ```
 
-Run the normal knowledge plan/apply from [getting started](getting-started.md#6-complete-knowledge-setup), with the Web IQ key it needs. No targeted apply is needed.
+Run the normal knowledge plan/apply from [getting started](getting-started.md#6-complete-knowledge-setup). No targeted apply is needed.
 
 ### Knowledge folders
 

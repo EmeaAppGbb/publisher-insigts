@@ -13,7 +13,7 @@ preparation checklist](../preparation.md) lists the same items as tasks.
 
 For a visual overview, see the [platform architecture](architecture.md) and [deployment flow](deployment-flow.md). The prepared toolchain includes the [official Microsoft IQ Copilot packages](copilot-tooling.md); their MCP authentication and runtime connections remain separate from image installation.
 
-**Guided App/CLI path:** open the derived repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document, live ontology and public-context retrieval, then publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
+**Guided App/CLI path:** open the derived repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document and live ontology retrieval and the keyless Web IQ wiring, then publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
 
 **Deterministic path:** the skill drives the same [runner](development.md#deploy-deterministically) that you can run yourself, with the same gates and no AI agent: `python3 .github/skills/deploy-platform/scripts/deploy.py up`. The steps below remain the canonical manual flow and the runner's contract.
 
@@ -35,7 +35,7 @@ longest lead times; they are typical, not guaranteed.
 | Administrator consent | An Entra administrator: the runner, as you, when you are one | Minutes as an administrator; otherwise book one | Tenant-wide consent for the deployment registration's declared Fabric scopes ([step 3](#3-bootstrap-the-fabric-user-auth-application)) and, optionally, the app's Foundry sign-in scope; with Work IQ, also `WorkIQAgent.Ask` and `offline_access` ([Work IQ](#work-iq)). A role such as Cloud Application Administrator can grant it. |
 | Fabric tenant settings | Fabric administrator | Hours to days | [**Users can create ontology (preview) items**](https://learn.microsoft.com/fabric/iq/ontology/overview-tenant-settings), [**Users can create deployment plan (preview) items**](https://learn.microsoft.com/fabric/cicd/deployment-plan/how-to-create-deployment-plan), external-app OneLake access and service-principal Fabric APIs. The template never changes tenant settings, and the runner does not check them up front. |
 | Fabric permissions | Fabric administrator | Hours | You can create workspaces, connections and deployment pipelines, and you are listed in `fabric_capacity_admins`. Bootstrap needs `Item.ReadWrite.All` and `Item.Execute.All`. |
-| Web IQ | You; your Microsoft representative | Days or more: enablement is a request | The paid subscription is enabled for Web IQ; Azure credits do not pay for it. You accept its terms before deployment, then link the resource and create an API key after the platform step ([Web IQ](#web-iq)). |
+| Web IQ | You; your Microsoft representative | Days or more: enablement is a request | The paid subscription is enabled for Web IQ; Azure credits do not pay for it. You accept its terms before deployment, link the resource after the platform step and bind the Foundry project identity to its AppID after knowledge setup ([Web IQ](#web-iq)). |
 | Region and quota | You; a subscription owner for quota requests | Days, if quota must be raised | One region that offers [Fabric](https://learn.microsoft.com/fabric/admin/region-availability), [Search agentic retrieval](https://learn.microsoft.com/azure/search/search-region-support), the [serverless Search tier](https://learn.microsoft.com/azure/search/search-sku-tier#serverless-pricing-model-preview) (or set `search_sku` to a dedicated tier such as `basic`), Foundry with the models in [`variables.tf`](../infra/variables.tf), Azure Container Apps and Container Registry. Quota: [Fabric CUs](https://learn.microsoft.com/fabric/enterprise/fabric-quotas) for the SKU (F2 by default); `gpt-5.4-mini` GlobalStandard for the `agent` (100 units) and `chat` (10) deployments, summed because they share one quota; and `text-embedding-3-small` (10). |
 | Work IQ (optional) | Global administrator; billing administrator; Microsoft 365 administrator | Days: billing and mailboxes | Only with `work_iq_enabled = true`: the tenant's Work IQ service principal, a Copilot Credits spending policy that covers the Work IQ API and every user, a mailbox per user, and consent ([Work IQ](#work-iq)). |
 | Fabric Git synchronization (optional) | You; your GitHub organization owner | Hours, for PAT approval or SSO | Only with `fabric_git_enabled = true`: a fine-grained PAT for the **new repository** with **Contents: Read and write**, plus Git/GitHub tenant settings, workspace Admin and any applicable cross-geography export setting. |
@@ -73,8 +73,8 @@ earlier phases and acts only on what is missing, so rerunning `up` resumes.
 | 4 | [Provision the platform](#4-provision-the-platform) | `platform` | `--approve platform=<sha12>` |
 | 5 | [Bootstrap DEV](#5-bootstrap-dev) | `bootstrap` | None by default; `--approve item-update=<sha12>` with `--update-definitions` |
 | 6 | [Verify bindings](#5-bootstrap-dev) | `bootstrap` | A missing binding blocks |
-| 7 | [Wire knowledge](#6-complete-knowledge-setup) | `knowledge` | `WEB_IQ_API_KEY`; `--approve knowledge=<sha12>` |
-| 8 | [Prove retrieval](#6-complete-knowledge-setup) | `verify` | [Web IQ](#web-iq) portal steps; with Work IQ, its consent; missing evidence blocks |
+| 7 | [Wire knowledge](#6-complete-knowledge-setup) | `knowledge` | `--approve knowledge=<sha12>` |
+| 8 | [Prove retrieval](#6-complete-knowledge-setup) | `verify` | The [Web IQ](#web-iq) binding and `--web-iq-bound`; with Work IQ, its consent; missing evidence blocks |
 | 9 | Report DEV ready | `verify` | Every check above passed |
 | 10 | [Publish the agents, deploy the app](#7-create-the-agents-and-app) | `agent`, `app` | `agent-publish`; `app-build`; `--approve app=<sha12>` |
 
@@ -139,9 +139,9 @@ export TF_VAR_github_token
 
 Complete the [Web IQ](#web-iq) steps and set `web_iq_terms_accepted = true`
 before deployment. Terraform provisions the global G3 account; the agents'
-public-context tool reaches it through Search with the key you supply. The
-runner's `verify` phase requires portal AppID linking, `WEB_IQ_API_KEY` and a cited
-public search.
+public-context tool reaches it through Search, keyless, as the Foundry project's
+identity. The runner's `verify` phase waits until you confirm binding that
+identity to the account's AppID in the Web IQ portal.
 
 ### Configuration keys
 
@@ -157,7 +157,6 @@ comments. Keep credentials and tenant and subscription IDs out of the file.
 | `search_sku` | `serverless` | You want a dedicated, SLA-backed tier such as `basic` |
 | `fabric_git_enabled` | `false` | You opt into Fabric GitHub synchronization, which needs a PAT |
 | `web_iq_terms_accepted` | `false` | Always: set `true` once you accept the [Web IQ](#web-iq) terms |
-| `web_iq_api_key_version` | `1` | You rotated the Web IQ key: increment it. The key itself goes only in `WEB_IQ_API_KEY` |
 | `work_iq_enabled` | `false` | You opt into the Work IQ mail tool and meet its [prerequisites](#work-iq) |
 | `knowledge_lakehouse_id`, `knowledge_ontologies` | `null`, `{}` | Never by hand on the runner path: the knowledge phase writes them after binding |
 | `knowledge_folders` | `documents`: `Files/documents`, attached | You index more document folders. An override replaces the whole map; keys can't be `web` or end in `-ontology` ([folders](ontology-knowledge.md#register-the-folders-and-the-ontology)) |
@@ -302,7 +301,14 @@ The knowledge plan adds the knowledge source `<project>-web`, which allows only 
 Web IQ MCP `web` tool, as the only source of the knowledge base
 `<project>-public-context`, which the with-IQ agent's public-context tool reads. It
 is separate from the agents' document knowledge base, so a document question never
-triggers a web search. Complete these steps before knowledge setup:
+triggers a web search.
+
+There is no Web IQ key. The source authenticates through the Foundry project's
+`web-iq` connection: when an agent's tool queries the knowledge base, Foundry Agent
+Service calls Web IQ with a token for the project's managed identity. Web IQ uses no
+Azure RBAC; it accepts that identity once its application (client) ID is bound to
+the account's AppID. Only Agent Service resolves the connection, so a direct
+retrieval from the knowledge base, such as the runner's, can't reach Web IQ.
 
 1. Before deployment, have Web IQ enabled for the paid subscription; ask your
    Microsoft representative. Azure credits do not work. Accept the
@@ -313,30 +319,18 @@ triggers a web search. Complete these steps before knowledge setup:
    [Web IQ Profile Management](https://webiq.microsoft.ai/profiles), select the
    subscription and the deployed resource, finish linking it and select its
    **Web IQ AppID**.
-3. Create a Web Search-enabled API key for that AppID, and supply it to the
-   deployment shell only as `WEB_IQ_API_KEY`, without echo or shell history:
+3. After knowledge setup, the `verify` phase prints the project identity's
+   application (client) ID, also the `web_iq` output's `client_id`. On that AppID's
+   **Application (Client) IDs** tab, select **Bind Application (Client) ID** and
+   enter it; the binding can take a minute to apply. Then rerun `up` with
+   `--web-iq-bound <client-id>`. The runner records your confirmation and asks again
+   only if the project identity changes, for example after the project is recreated.
 
-   ```sh
-   set +x
-   printf 'Web IQ key: '
-   read -rs WEB_IQ_API_KEY
-   printf '\n'
-   export WEB_IQ_API_KEY
-   ```
-
-Keep the key out of chat, files, tfvars, command arguments and the app. The runner
-passes it to Terraform as the ephemeral, write-only `web_iq_api_key` on every plan
-and apply from knowledge setup on, never on destroy plans or earlier ones. The
-public-context source stores it, Search masks it on read, and it never enters
-tfvars, state or plans. Export it in every shell that runs `up` from then on:
-without it, the knowledge and app phases wait. Never export
-`TF_VAR_web_iq_api_key` in a shell that runs the runner, which refuses it. After rotating the key, export the new one and increment
-`web_iq_api_key_version`.
-
-The `verify` phase makes one fixed public-only search and one cited retrieval
-through the public-context knowledge base, each attempted once because Web IQ
-searches are billable. Neither proves the agent's tool: check a cited
-public-context line in the app ([runtime integration](runtime-integration.md#web-iq)).
+The `verify` phase checks the account and that the source calls Web IQ through the
+`web-iq` connection with no stored key, without a billable call. It can't read the
+binding or retrieve through the source, so Web IQ retrieval stays unverified until a
+cited public-context line in the app proves the agent's tool
+([runtime integration](runtime-integration.md#web-iq)).
 
 ## Work IQ
 
@@ -386,7 +380,7 @@ grant. Without a tenant that meets these prerequisites, Work IQ stays unverified
 
 ## 6. Complete knowledge setup
 
-With `WEB_IQ_API_KEY` exported, rerun `up`. The knowledge phase writes `knowledge_lakehouse_id`, the `Books` lakehouse's physical GUID, and the `scenario` entry of `knowledge_ontologies`, with `BooksOntology`'s physical GUID, into the **same** `terraform.tfvars` with the [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then saves an untargeted plan; approve it with `--approve knowledge=<sha12>`. By hand, set the same two values:
+Rerun `up`. The knowledge phase writes `knowledge_lakehouse_id`, the `Books` lakehouse's physical GUID, and the `scenario` entry of `knowledge_ontologies`, with `BooksOntology`'s physical GUID, into the **same** `terraform.tfvars` with the [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then saves an untargeted plan; approve it with `--approve knowledge=<sha12>`. By hand, set the same two values:
 
 ```hcl
 knowledge_lakehouse_id = "<dev-Books-lakehouse-guid>"
@@ -398,16 +392,16 @@ knowledge_ontologies = {
 }
 ```
 
-Leave this map empty only if you want document-only retrieval. Then run another normal plan/apply. By hand, give both commands the [Web IQ](#web-iq) key, as the runner does: a plan without it would remove the key the public-context source stores.
+Leave this map empty only if you want document-only retrieval. Then run another normal plan/apply:
 
 ```sh
-TF_VAR_web_iq_api_key="$WEB_IQ_API_KEY" terraform plan -out=knowledge.tfplan
+terraform plan -out=knowledge.tfplan
 # Review the plan output before continuing:
-TF_VAR_web_iq_api_key="$WEB_IQ_API_KEY" terraform apply knowledge.tfplan
+terraform apply knowledge.tfplan
 terraform output
 ```
 
-Terraform looks up the lakehouse and configured ontologies in DEV without owning their definitions. It creates one indexed OneLake source per `knowledge_folders` entry (`<project>-documents` by default), the agents' knowledge base `<project>-knowledge` over the attached folder sources, the live ontology source in the check-only knowledge base `<project>-ontology-check`, the [Web IQ](#web-iq) public-context source and knowledge base, the agents' `knowledge-base`, `public-context` and `fabric-scenario` connections, and the Search identity's grants. An ID from TEST or another workspace fails the lookup. Keep the values set on subsequent runs; clearing them plans removal of knowledge objects, not a pause. No targeted apply is needed.
+Terraform looks up the lakehouse and configured ontologies in DEV without owning their definitions. It creates one indexed OneLake source per `knowledge_folders` entry (`<project>-documents` by default), the agents' knowledge base `<project>-knowledge` over the attached folder sources, the live ontology source in the check-only knowledge base `<project>-ontology-check`, the [Web IQ](#web-iq) public-context source and knowledge base, the agents' `knowledge-base`, `public-context` and `fabric-scenario` connections, the source's keyless `web-iq` connection, and the Search identity's grants. An ID from TEST or another workspace fails the lookup. Keep the values set on subsequent runs; clearing them plans removal of knowledge objects, not a pause. No targeted apply is needed.
 
 The `fabric-scenario` connection is a non-shared native Foundry Fabric IQ
 `UserEntraToken` connection to the ontology's DEV MCP endpoint, reported by
@@ -430,7 +424,7 @@ The `verify` phase then proves **DEV ready** with your own Search token, never a
 - Every folder source, attached or not, has ingested its folder.
 - Live ontology retrieval through the check-only knowledge base returns `fabricOntology` activity and references for DEV's workspace and ontology, with **The Glass Orchard** and **Forecast variance** in the live source data (or your `--expect` facts). An answer from a document does not count.
 - Document retrieval from the agents' knowledge base cites the `documents` source. That base runs at minimal effort, so `verify` sends the question as a search intent.
-- One public-only Web IQ search and one public-context retrieval succeed.
+- Web IQ's account is provisioned, the public-context source calls it through the `web-iq` connection with no stored key, and you confirmed binding the project identity to its AppID (`--web-iq-bound`). No Web IQ call is made, so its retrieval stays unverified until the app.
 - With Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection exist; no Work IQ call is made.
 
 Report DEV ready only after `verify` succeeds. The [runtime authentication and retrieval example](ontology-knowledge.md#supply-the-end-users-identity-at-query-time) shows the user header the live source needs.
@@ -451,9 +445,7 @@ explains the identity flow, access model and evidence.
 
 Both share a byte-identical `agent.json` (the model deployment and reasoning
 effort) and `instructions.md`; only their tools differ, so the app can compare an
-answer with IQ against one without. Rerun `up` on the same host, checkout and state,
-with `WEB_IQ_API_KEY` still exported: the app's plan, like every plan after
-knowledge setup, carries it.
+answer with IQ against one without. Rerun `up` on the same host, checkout and state.
 
 ```sh
 set +x
@@ -521,7 +513,7 @@ content sit in a protected table that only you, the deployer, can read
 
 - **Isolation:** start each project with new state; never copy another project's tfvars, state, or `.terraform/`. Once deployed, retain state and keep `project_name` stable. Use an encrypted, access-controlled remote backend with a separate state key per project before team/CI use.
 - **Identity lifecycle:** the deployment app registration shares that project's state with the platform. Full plans still require access to its Entra objects. Fabric resources depend on the identity module so Terraform tears them down before removing the login registration. Do not remove those dependencies, target-destroy the module, or delete the registration manually while Fabric resources still need it.
-- **Secrets:** state/plans can contain provider-returned secrets; the Search admin key is read ephemerally on each run and is not stored. Keep state, PATs, tfvars, and debug logs out of Git. OneLake uses Entra authentication; runtime access uses managed identities and each signed-in user's own token. The web app holds no secret, Application Insights accepts no ingestion key, the Work IQ registration is a public client, and the Web IQ key lives only in Search. Commit `.terraform.lock.hcl`.
+- **Secrets:** state/plans can contain provider-returned secrets; the Search admin key is read ephemerally on each run and is not stored. Keep state, PATs, tfvars, and debug logs out of Git. OneLake uses Entra authentication; runtime access uses managed identities and each signed-in user's own token. The web app holds no secret, Application Insights accepts no ingestion key, the Work IQ registration is a public client, and Web IQ is called keyless, as the Foundry project identity. Commit `.terraform.lock.hcl`.
 - **Scope/cost:** resources, notebook execution and retrieval are billable; endpoints, including the web app, are authenticated but public; ontology/deployment-plan/Foundry IQ features, the Fabric IQ agent tool, Web IQ and the serverless Search tier are preview (no SLA, no tier migration). Serverless bills compute per use, including each folder source's five-minute ingestion schedule. Semantic ranking and agentic retrieval use their standard plans: monthly free allowances, then pay-as-you-go. Only the DEV lakehouse's knowledge folders are indexed. Registered ontologies query their bound data live with end-user permissions; arbitrary tables/graphs/models are not automatically exposed. GlobalStandard model deployments bill per token, every Web IQ call is a billable search, and Work IQ calls consume Copilot Credits. TEST stays empty until promotion; the agents and app serve DEV only, and PROD provisioning is not included. Folder-source/embedding configuration changes rebuild the index.
 - **Between sessions:** the app keeps one warm replica by default. Pause the Fabric capacity in the Azure portal and set `app = { min_replicas = 0 }` when idle; resume the capacity before use, and expect a cold start on the first question ([troubleshooting](runtime-integration.md#troubleshooting)).
 - **Teardown:** use the [runner's `down` command](development.md#delete-the-environment) to delete everything in Terraform state, including the container app, the Foundry project with both agents, workspace data and Search ingestion assets. Retained Fabric workspaces, deleted Entra registrations and Web IQ portal credentials need manual cleanup.

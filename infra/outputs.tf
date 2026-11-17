@@ -204,13 +204,15 @@ output "fabric_iq_connections" {
 }
 
 output "web_iq" {
-  description = "Web IQ account and public service endpoints."
+  description = "Web IQ account, public service endpoints and its keyless route: the web-iq connection, through which Agent Service authenticates the public-context source as the Foundry project identity, and that identity's application (client) ID, which an operator binds to the account's AppID in the Web IQ portal (both null until knowledge setup)."
   value = {
     resource_id     = azapi_resource.web_iq.id
     management_url  = "https://management.azure.com${azapi_resource.web_iq.id}?api-version=2026-06-01-preview"
     portal_url      = "https://webiq.microsoft.ai/profiles"
     search_endpoint = "https://api.microsoft.ai/v3/search/web"
     mcp_endpoint    = local.web_iq_mcp_endpoint
+    connection_name = one(azapi_resource.web_iq_connection[*].name)
+    client_id       = one(data.azuread_service_principal.foundry_project[*].client_id)
   }
 }
 

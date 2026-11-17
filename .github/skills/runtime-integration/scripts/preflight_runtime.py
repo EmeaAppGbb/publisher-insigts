@@ -31,7 +31,7 @@ TOOL_NAMES = {"node": "Node", "git": "Git", "az": "Azure CLI"}
 UNVERIFIED = [
     "Model deployment quota and Search new-service regional capacity (deploy.py's preflight checks model quota)",
     "ACR Tasks in this subscription, which deploy.py's app phase builds the image with",
-    "Web IQ for this subscription: its terms, eligibility and API key",
+    "Web IQ for this subscription: its terms, eligibility and the portal binding of the Foundry project identity",
     "Each user's Foundry role and consent to the app's Foundry access and to the agents' Fabric IQ tool",
     "Agent invocation as the signed-in user, its MCP tool calls and native knowledge retrieval",
     "Document ingestion, live ontology references and denied-user behavior",

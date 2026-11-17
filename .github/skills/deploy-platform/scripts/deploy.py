@@ -122,9 +122,7 @@ VARIABLES = ("project_name", "location", "fabric_location", "search_location", "
              "knowledge_lakehouse_id", "knowledge_ontologies", "chat_model", "embedding_model", "agent_model",
              "app_image_tag", "web_iq_terms_accepted", "work_iq_enabled")
 WEB_IQ_API_VERSION = "2026-06-01-preview"
-WEB_IQ_SEARCH = "https://api.microsoft.ai/v3/search/web"
 WEB_IQ_PORTAL = "https://webiq.microsoft.ai/profiles"
-WEB_IQ_QUESTION = "Microsoft Web IQ documentation"
 SEARCH_OFFERINGS = f"{ARM_API}/providers/Microsoft.Search/fetchOfferings?api-version=2026-09-01-preview"
 SEARCH_SERVICE_PATH = re.compile(r"/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Search/searchServices/[^/]+",
                                  re.IGNORECASE)
@@ -160,8 +158,6 @@ class Scenario(NamedTuple):
     # Asked of the agents' knowledge base, retrieving from the indexed OneLake folder source document_source names.
     document_question: str
     document_source: str
-    # Asked once of the public-context knowledge base: public terms only, never a site, asset or other private detail.
-    public_context_question: str
     expected_facts: tuple
     app_question: str
 
@@ -187,8 +183,6 @@ SCENARIO = Scenario(
                        "ComputeBookSignals write, and which source should be used for current sales, stock and "
                        "signals? Answer from the OneLake document and cite it."),
     document_source="documents",
-    public_context_question=("What public trends are shaping literary fiction sales and literary prize coverage in "
-                             "the UK this autumn?"),
     # Computed rows: the live ontology source must return them in its own source data, not only the starter document.
     # They hold for the seeded weeks and after the demo advances a week.
     expected_facts=("The Glass Orchard", "Forecast variance"),
@@ -713,7 +707,7 @@ def approval_record(key, description, pending):
     return record
 
 
-def terraform_env(ctx, token_required, web_iq_required=False):
+def terraform_env(ctx, token_required):
     env = dict(ctx.environ)
     for key in ("TF_LOG", "TF_LOG_CORE", "TF_LOG_PROVIDER", "TF_LOG_PATH"):
         if env.get(key):
@@ -731,28 +725,11 @@ def terraform_env(ctx, token_required, web_iq_required=False):
         env["TF_VAR_github_token"] = token
     elif token_required:
         raise Waiting("The Fabric GitHub PAT is not available on this host.", *PAT_STEPS)
-    # Terraform gets the key exactly when a plan manages the public-context source: an ephemeral variable set at plan
-    # time must be set again at apply, and one that wasn't must not be, so its presence can't depend on the shell.
-    key = (env.pop("WEB_IQ_API_KEY", None) or "").strip()
-    if web_iq_required:
-        if not key:
-            raise Waiting("Knowledge plans need the Web IQ key: the public-context knowledge source stores it write-only.",
-                          "Supply that resource's key only through WEB_IQ_API_KEY on the deployment host, then rerun.",
-                          "Never paste keys into chat, Terraform inputs, files or the browser app; see docs/getting-started.md#web-iq.")
-        if any(ord(character) < 33 or ord(character) > 126 for character in key):
-            raise Blocked("WEB_IQ_API_KEY contains invalid HTTP header characters; supply a valid portal key.")
-        env["TF_VAR_web_iq_api_key"] = key
     return env
 
 
-def web_iq_key_required(ctx, destroy=False):
-    """After knowledge setup every plan manages the Web IQ public-context source; Terraform needs its write-only
-    key at plan and at apply, because ephemeral values are not saved in a plan. Teardown doesn't."""
-    return not destroy and variables(ctx)["knowledge_lakehouse_id"] is not None
-
-
-def terraform(ctx, *arguments, token=False, web_iq=False, stream=False, input_text=None):
-    env = terraform_env(ctx, token, web_iq)
+def terraform(ctx, *arguments, token=False, stream=False, input_text=None):
+    env = terraform_env(ctx, token)
     if arguments[0] == "console" and not env.get("TF_VAR_github_token"):
         # Evaluate the Git opt-in before requiring its ephemeral credential, never for plan/apply.
         env["TF_VAR_github_token"] = "evaluation-only"
@@ -891,8 +868,7 @@ def converge(ctx, phase, target=None, check=None, variables=None, before_apply=N
         command += [f"-var={name}={value}" for name, value in sorted((variables or {}).items())]
         ctx.log("Creating a saved plan" + (f" targeted at {target} (expected only here)" if target else "")
                 + "".join(f" with {name}={value}" for name, value in sorted((variables or {}).items())) + ".")
-        result = terraform(ctx, *command, token=git_token_required(ctx), web_iq=web_iq_key_required(ctx, destroy),
-                           stream=True)
+        result = terraform(ctx, *command, token=git_token_required(ctx), stream=True)
         if result.code == 0:
             path.unlink(missing_ok=True)
             if before_apply:
@@ -942,8 +918,7 @@ def converge(ctx, phase, target=None, check=None, variables=None, before_apply=N
     approve(ctx, phase, f"Apply the saved {phase} plan ({describe(summary)})" + (f"; {note}" if note else ""), pending)
     if before_apply:
         before_apply()
-    result = terraform(ctx, "apply", "-input=false", pending["path"], token=git_token_required(ctx),
-                       web_iq=web_iq_key_required(ctx, destroy), stream=True)
+    result = terraform(ctx, "apply", "-input=false", pending["path"], token=git_token_required(ctx), stream=True)
     discard_plan(ctx, phase)
     if not result.code:
         # Every other saved plan was made against the state this apply changed, so Terraform would refuse it.
@@ -1432,7 +1407,8 @@ def check_web_iq(ctx, subscription, values):
                       "Ask your Microsoft representative to enable Web IQ for a paid subscription; Azure credits do not work.",
                       "Provider registration alone does not prove subscription eligibility.")
     return ("Web IQ global G3 required; Terraform registers Microsoft.WebIQ; paid-subscription eligibility "
-            "is proven only by account creation; portal AppID linking remains manual")
+            "is proven only by account creation; binding the Foundry project identity to the account's AppID in the "
+            "Web IQ portal remains manual")
 
 
 def signed_in_account(ctx):
@@ -1807,8 +1783,9 @@ def phase_platform(ctx):
     if git_token_required(ctx):
         required_outputs(ctx, "github_connect_request")
     principal = ensure_search_identity(ctx, required=True)
-    ctx.log(f"Web IQ account provisioned; connect its resource_id output at {WEB_IQ_PORTAL}. "
-            "AppID onboarding, authenticated search and agent/app integration are not yet verified; see docs/getting-started.md#web-iq.")
+    ctx.log(f"Web IQ account provisioned; connect its resource_id output at {WEB_IQ_PORTAL} to create its AppID. "
+            "After knowledge setup, verify asks you to bind the Foundry project identity to that AppID; Web IQ "
+            "retrieval and agent/app integration are not yet verified; see docs/getting-started.md#web-iq.")
     return (f"{result}; DEV workspace {name} ({workspace}); Search identity {principal}; "
             "workspace bootstrap and knowledge setup pending")
 
@@ -2643,7 +2620,9 @@ def knowledge_url(endpoint, collection, name, action, version):
     return f"{path}?api-version={urllib.parse.quote(version, safe='')}"
 
 
-def search_call(ctx, method, url, body=None, *, user_header=False):
+def search_call(ctx, method, url, body=None, *, user_header=False, attempts=1):
+    """One Search data-plane call as the signed-in user. By default it is sent once: its callers poll or retry
+    within their own budgets; attempts=None gives a single read the transport's own retries."""
     token = access_token(ctx, resource=SEARCH_RESOURCE)
     if not token:
         raise Waiting("Azure CLI could not get a Search token for the signed-in user.", "Sign in again, then rerun.")
@@ -2652,8 +2631,7 @@ def search_call(ctx, method, url, body=None, *, user_header=False):
         # The same delegated user token authenticates Search and the live Fabric source.
         headers["x-ms-query-source-authorization"] = token
     try:
-        # Its callers poll or retry within their own budgets, and a public-context retrieval is sent once.
-        return ctx.http.request(method, url, headers=headers, body=body, timeout=150, attempts=1)
+        return ctx.http.request(method, url, headers=headers, body=body, timeout=150, attempts=attempts)
     except TransportError:
         return Response(599)
 
@@ -2742,20 +2720,6 @@ def document_evidence(body, name):
     return problems, {"activity": len(activity), "references": len(references)}
 
 
-def public_context_evidence(body, name):
-    problems = []
-    activity = [entry for entry in body.get("activity") or [] if entry.get("type") == "mcpServer"
-                and entry.get("knowledgeSourceName") in (None, name)]
-    references = [entry for entry in body.get("references") or [] if entry.get("type") == "mcpServer"]
-    if not activity:
-        problems.append(f"no mcpServer activity for {name}")
-    elif any(entry.get("error") for entry in activity):
-        problems.append("the Web IQ tool call reported an error")
-    if not references:
-        problems.append("no cited Web IQ reference")
-    return problems, {"activity": len(activity), "references": len(references)}
-
-
 def save_evidence(ctx, name, body):
     directory = ctx.state.directory / "evidence"
     directory.mkdir(parents=True, exist_ok=True)
@@ -2799,7 +2763,14 @@ def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intent
                   "Never accept a document-only answer as live ontology evidence.")
 
 
-def verify_web_iq(ctx):
+def verify_web_iq(ctx, endpoint, version):
+    """Web IQ's keyless route, without a billable call: the account, the public-context source's authentication
+    through the web-iq connection, and the operator's confirmation that the Foundry project identity's application
+    (client) ID is bound to the account's AppID.
+
+    Only Agent Service resolves that connection, so no direct retrieval, the runner's included, reaches Web IQ through
+    the source: the agent's cited public-context line in the app is the first proof that Web IQ answers.
+    """
     account, = required_outputs(ctx, "web_iq")
     resource_id = account.get("resource_id") if isinstance(account, dict) else None
     subscription = re.escape(ctx.target("subscription_id"))
@@ -2808,9 +2779,11 @@ def verify_web_iq(ctx):
             resource_id, re.IGNORECASE):
         raise Blocked("The Web IQ output is not an account in the selected subscription.")
     receipt = ctx.state.section("web_iq")
+    # The operator's confirmation outlives each check, and holds only for the identity it names.
+    bound = {key: receipt[key] for key in ("bound_client_id", "bound_confirmed_at") if key in receipt}
     receipt.clear()
     receipt.update(resource_id=resource_id, checked_at=utc_now(), status="provisioning_unverified",
-                   agent_app_integration="unverified")
+                   retrieval="unverified", agent_app_integration="unverified", **bound)
     ctx.state.save()
     url = f"{ARM_API}{resource_id}?api-version={WEB_IQ_API_VERSION}"
     response = arm(ctx, "GET", url)
@@ -2827,47 +2800,52 @@ def verify_web_iq(ctx):
         if state in ("Failed", "Canceled"):
             raise Blocked(f"Web IQ account provisioning failed: {state}.")
         raise Waiting(f"Web IQ account is not provisioned yet: {state}.", "Rerun after provisioning completes.")
-    receipt["status"] = "onboarding_pending"
-    ctx.state.save()
-    key = ctx.environ.get("WEB_IQ_API_KEY", "").strip()
-    if not key:
-        raise Waiting("Web IQ account is provisioned, but authenticated search is unverified.",
-                      f"Sign in to {WEB_IQ_PORTAL}, connect the deployed Web IQ resource and create its AppID/API key.",
-                      "Supply that resource's key only through WEB_IQ_API_KEY on the deployment host, then rerun.",
-                      "Never paste keys into chat, Terraform inputs, files or the browser app; see docs/getting-started.md#web-iq.")
-    if any(ord(character) < 33 or ord(character) > 126 for character in key):
-        raise Blocked("WEB_IQ_API_KEY contains invalid HTTP header characters; supply a valid portal key.")
-    receipt["status"] = "search_unverified"
-    ctx.state.save()
-    response = ctx.http.request("POST", WEB_IQ_SEARCH, headers={"x-apikey": key}, body={
-        "query": WEB_IQ_QUESTION, "maxResults": 3, "contentFormat": "passage",
-        "maxLength": 1000, "safeSearch": "strict", "language": "en", "region": "US",
-    })
+    connection, client = account.get("connection_name"), account.get("client_id")
+    if not connection or not client:
+        raise Blocked("The web_iq output has no web-iq connection or Foundry project identity client ID.",
+                      "Rerun deploy.py up so the knowledge plan creates them.")
+    client = guid(client, "The web_iq output's client_id")
+    source, = required_outputs(ctx, "public_context_knowledge_source_name")
+    response = search_call(ctx, "GET", knowledge_url(endpoint, "knowledgesources", source, None, version), attempts=None)
+    if response.status in (408, 429, 500, 502, 503, 504, 599):
+        raise Waiting(f"Search could not return knowledge source {source} (HTTP {response.status}).",
+                      "Rerun deploy.py up in a minute.")
     if response.status != 200:
-        # Do not echo data-plane error bodies: an upstream service may reflect credentials.
-        raise Blocked(f"Web IQ search failed with HTTP {response.status}; no successful search evidence was recorded.",
-                      "Check portal resource/AppID linking, the key's web permission and rate limits. "
-                      "The runner does not retry a billable search automatically.")
-    body = response.json(default={})
-    results = body.get("webResults") if isinstance(body, dict) else None
-    if not isinstance(results, list) or not results:
-        raise Blocked("Web IQ returned no web results; authenticated grounding is not verified.")
-    dated = 0
-    for result in results:
-        if not isinstance(result, dict):
-            raise Blocked("Web IQ returned a malformed web result.")
-        source = urllib.parse.urlparse(str(result.get("url") or ""))
-        if (source.scheme not in ("http", "https") or not source.hostname or source.username or source.password
-                or not isinstance(result.get("title"), str) or not result["title"].strip()
-                or not isinstance(result.get("content"), str) or not result["content"].strip()):
-            raise Blocked("Web IQ returned a result without a usable citation or grounding passage.")
-        dated += bool(result.get("crawledAt") or result.get("lastUpdatedAt"))
-    receipt.update(status="search_verified", verified_at=utc_now(), result_count=len(results),
-                   dated_result_count=dated, query=WEB_IQ_QUESTION)
+        raise ServiceError(f"Reading knowledge source {source}", response)
+    definition = response.json(default={})
+    parameters = (definition.get("mcpServerParameters") if isinstance(definition, dict) else None) or {}
+    authentication = parameters.get("authentication")
+    authentication = authentication if isinstance(authentication, dict) else {}
+    # Search serializes the other authentication kinds' parameters as nulls, so check the fields that decide it.
+    keyless = (authentication.get("kind") == "foundryConnection"
+               and (authentication.get("foundryConnectionParameters") or {}).get("connectionId") == connection
+               and not authentication.get("storedHeadersParameters"))
+    if parameters.get("serverURL") != account.get("mcp_endpoint") or not keyless:
+        raise Blocked(f"Knowledge source {source} doesn't call Web IQ keylessly through the {connection} connection.",
+                      "Rerun deploy.py up so the knowledge plan restores it; never store a Web IQ key in it.")
+    receipt.update(status="binding_unconfirmed", connection=connection, client_id=client)
     ctx.state.save()
-    return (f"Web IQ public-only search verified ({len(results)} cited passages, {dated} with freshness metadata); "
-            "portal credential/resource association is operator-confirmed; scenario freshness/conflicts and "
-            "agent/app integration remain unverified")
+    bind = (f"In {WEB_IQ_PORTAL}, open the AppID connected to this Web IQ account ({resource_id}); on its "
+            f"Application (Client) IDs tab, select Bind Application (Client) ID and enter {client}, the Foundry "
+            "project identity's application (client) ID.")
+    confirmed = ctx.args.web_iq_bound
+    if confirmed and not same_guid(confirmed, client):
+        raise Blocked(f"--web-iq-bound names {confirmed}, but the Foundry project identity's application (client) ID "
+                      f"is {client}.", bind, f"Then rerun with --web-iq-bound {client}.")
+    if confirmed:
+        receipt.update(bound_client_id=client, bound_confirmed_at=utc_now())
+    elif not same_guid(receipt.get("bound_client_id"), client):
+        raise Waiting("Web IQ is wired keylessly, but nobody has confirmed binding the Foundry project identity to its "
+                      "AppID; until then Web IQ refuses the agents' public-context calls.", bind,
+                      f"Then rerun with --web-iq-bound {client}.",
+                      "The runner can't read the binding: only the agent's cited public-context line in the app "
+                      "proves it.")
+    receipt["status"] = "bound_unverified"
+    ctx.state.save()
+    return (f"Web IQ account provisioned and wired keylessly: the public-context source calls Web IQ through the "
+            f"{connection} connection as the Foundry project identity ({client}), whose AppID binding is "
+            "operator-confirmed; Web IQ retrieval and agent/app integration remain unverified until the agent's "
+            "cited public-context line in the app")
 
 
 def phase_verify(ctx):
@@ -2896,17 +2874,10 @@ def phase_verify(ctx):
         "kind": "indexedOneLake", "knowledgeSourceName": documents,
         "includeReferences": True, "includeReferenceSourceData": True},
         lambda body: document_evidence(body, documents), intents=True)
-    web_iq = verify_web_iq(ctx)
-    public, web_source = required_outputs(ctx, "public_context_knowledge_base_name", "public_context_knowledge_source_name")
-    # One attempt: every retrieval is a billable Web IQ search, which the runner never retries automatically.
-    public_context = prove_retrieval(ctx, knowledge_url(endpoint, "knowledgebases", public, "retrieve", version),
-                                     SCENARIO.public_context_question, {
-        "kind": "mcpServer", "knowledgeSourceName": web_source,
-        "includeReferences": True, "includeReferenceSourceData": True},
-        lambda body: public_context_evidence(body, web_source), attempts=1)
+    web_iq = verify_web_iq(ctx, endpoint, version)
     work_iq = verify_work_iq(ctx)
     ctx.state.section("verify").update(dev_ready_at=utc_now(), ingestion=ingestion, ontology=ontology, documents=document,
-                                       public_context=public_context, work_iq=work_iq)
+                                       work_iq=work_iq)
     ctx.state.save()
     if work_iq["enabled"]:
         mail = (f"Work IQ's {work_iq['connection']} connection is consented for WorkIQAgent.Ask; each user consents to "
@@ -2918,8 +2889,7 @@ def phase_verify(ctx):
         mail = "Work IQ is off (work_iq_enabled = false), so the with-IQ agent has no mail tool"
     return (f"DEV ready: ingestion succeeded for {len(ingestion)} OneLake folder source(s); live ontology retrieval "
             f"through {check_base} and document retrieval through {base} verified with your identity; "
-            f"{web_iq}; Web IQ public context retrieved through Foundry IQ "
-            f"({public_context['references']} cited references); {mail}")
+            f"{web_iq}; {mail}")
 
 
 def verify_work_iq(ctx):
@@ -3397,7 +3367,8 @@ def teardown_next(snapshot):
         steps.append("The Foundry agents (" + ", ".join(snapshot["agents"]) + ") and their stored runs were deleted with "
                      "the Foundry project, and the purge removed the account.")
     steps += [
-        "Revoke the Web IQ AppID's keys and remove its portal profile at https://webiq.microsoft.ai/profiles.",
+        "Unbind the deleted Foundry project identity's client ID from the Web IQ AppID, revoke any keys and remove its "
+        "portal profile at https://webiq.microsoft.ai/profiles.",
         "Keep Terraform state, tfvars and receipts until cleanup is confirmed. GitHub, backend storage, tenant settings, "
         "licenses, external source data and service-retained backups/audit records are not deleted.",
     ]
@@ -3644,6 +3615,14 @@ def approvals(values, parser):
     return granted
 
 
+def client_id_argument(value):
+    """An application (client) ID argument, normalized like the GUIDs the runner prints."""
+    try:
+        return str(UUID(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an application (client) ID (a GUID)") from None
+
+
 def parse_arguments(argv):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="print the final report as JSON on stdout")
@@ -3684,6 +3663,9 @@ def parse_arguments(argv):
     group.add_argument("--update-definitions", action="store_true",
                        help="replace changed definitions of deployed notebooks, ontologies and deployment plans "
                             "after an exact item-update approval (native import only; never lakehouses)")
+    group.add_argument("--web-iq-bound", type=client_id_argument, metavar="CLIENT_ID",
+                       help="you bound this Foundry project identity's application (client) ID, which verify prints, "
+                            "to the Web IQ account's AppID in the Web IQ portal")
     group = deployment.add_argument_group("readiness evidence")
     group.add_argument("--ontology-question", default=SCENARIO.ontology_question)
     group.add_argument("--document-question", default=SCENARIO.document_question)

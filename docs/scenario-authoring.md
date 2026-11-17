@@ -2,7 +2,7 @@
 
 Derived projects change the domain and workflow, not the platform architecture.
 Use one **Fabric -> knowledge -> prompt agents -> web app** core.
-The Web IQ account, public-search probe and public-context tool are standard
+The Web IQ account, its keyless route and the public-context tool are standard
 platform components. Work IQ mail is an opt-in tool (`work_iq_enabled`); graphs,
 semantic models and other runtime integrations are explicit opt-ins.
 
@@ -204,7 +204,7 @@ operator step.
 | Capability | Required addition and exit evidence |
 | --- | --- |
 | Work IQ | Shipped as the opt-in mail tool (`work_iq_enabled`): one read-only `fetch` of the user's own mail through OAuth identity passthrough, with the [prerequisites in getting started](getting-started.md#work-iq). Extend it only within read-only, user-delegated access and cited accessible work context. No mailbox clone or fixture masquerading as real work data. |
-| Web IQ | Standard: the Terraform account, the runner's probe and the agents' public-context tool ([preparation](../preparation.md#web-iq)). Portal AppID linking is a manual gate; require public-only queries, citations and scenario freshness/conflict checks. |
+| Web IQ | Standard: the Terraform account, its keyless `web-iq` connection, the runner's wiring check and the agents' public-context tool ([preparation](../preparation.md#web-iq)). Portal AppID linking and binding the project identity are manual gates; require public-only queries, citations and scenario freshness/conflict checks. |
 | Fabric graph | An approved native ontology projection/model, target-local bindings, materialization/refresh and bounded path-result checks. No second hand-authored relationship vocabulary. |
 | Semantic model | Native `.platform`, `definition.pbism` and exported TMDL definition parts, explicit binding/refresh action and exact governed calculation checks. |
 | Fabric data agent | Native definition/published endpoint, allowed sources, reader authorization and actual query receipts. Not a replacement for deterministic scenario rules. |

@@ -281,30 +281,6 @@ variable "web_iq_terms_accepted" {
   nullable    = false
 }
 
-variable "web_iq_api_key" {
-  description = "Web IQ API key for the public-context knowledge source. Never set it in tfvars: deploy.py passes WEB_IQ_API_KEY as TF_VAR_web_iq_api_key to every plan and apply after knowledge setup, never to teardown. A plan without it would remove the stored key. Write-only; Search masks it on read."
-  type        = string
-  default     = null
-  sensitive   = true
-  ephemeral   = true
-
-  validation {
-    condition     = var.web_iq_api_key == null || can(regex("^[!-~]+$", var.web_iq_api_key))
-    error_message = "web_iq_api_key must be a nonempty Web IQ portal key without spaces or control characters."
-  }
-}
-
-variable "web_iq_api_key_version" {
-  description = "Increment when rotating the write-only Web IQ API key, so the public-context source is updated with the new key."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.web_iq_api_key_version >= 1 && floor(var.web_iq_api_key_version) == var.web_iq_api_key_version
-    error_message = "web_iq_api_key_version must be a positive integer."
-  }
-}
-
 variable "work_iq_enabled" {
   description = "Opt in to Work IQ for the with-IQ agent's mail tool: a Work IQ public-client registration, Foundry's work-iq connection, through which the agent reads each user's mail as that user, and the agent's Work IQ tool. Prerequisites: a Microsoft 365 mailbox per user; a Copilot Credits spending policy covering the Work IQ API, which bills custom agents' Work IQ calls even for users with a Microsoft 365 Copilot licence; administrator consent to WorkIQAgent.Ask and offline_access; and each user's one-time consent, on their first Work IQ question."
   type        = bool

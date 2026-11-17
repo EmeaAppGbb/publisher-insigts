@@ -77,10 +77,10 @@ who acts on each item and how long it can take.
 - [ ] Set `web_iq_terms_accepted = true` in the same ignored tfvars file after accepting the terms.
 - [ ] After provisioning, read `terraform -chdir=infra output web_iq` and sign in to [Web IQ Profile Management](https://webiq.microsoft.ai/profiles).
 - [ ] Select the deployed subscription/resource, finish linking it, and select its resulting **Web IQ AppID**.
-- [ ] Create a Web Search-enabled API key for that AppID and inject it as `WEB_IQ_API_KEY` into the deployment process before knowledge setup, and in every later run; keep it out of chat, files, command history and the browser app.
-- [ ] Rerun the runner to verify an authenticated public search and a cited public-context retrieval.
+- [ ] Make sure that AppID allows Web Search. No API key is needed: the agents call Web IQ as the Foundry project identity.
+- [ ] After knowledge setup, when `verify` waits, bind the Foundry project identity's application (client) ID it prints (the `web_iq` output's `client_id`) on the AppID's **Application (Client) IDs** tab, then rerun the runner with `--web-iq-bound <client-id>`.
 - [ ] In the app, check a cited public-context line and that its query in the tool timeline holds public terms only; review citations, freshness and conflicting-source handling for your scenario ([Web IQ](docs/runtime-integration.md#web-iq)).
-- [ ] After rotating the key, export the new one and increment `web_iq_api_key_version`.
+- [ ] After recreating the Foundry project, bind its new identity's client ID and confirm it again.
 
 ## Work IQ (optional)
 

@@ -24,6 +24,14 @@ resource "azapi_resource" "web_iq" {
   }
 }
 
+# The Foundry project identity's application (client) ID, which an operator binds to the account's AppID in the Web IQ
+# portal. Read only from knowledge setup on, long after the platform apply created the identity, so Entra has it.
+data "azuread_service_principal" "foundry_project" {
+  count = var.knowledge_lakehouse_id == null ? 0 : 1
+
+  object_id = azapi_resource.foundry_project.identity[0].principal_id
+}
+
 # Public context for the agents' Web IQ tool: a knowledge base whose only source is Web IQ, kept apart from the agents'
 # document knowledge base so that no document question can trigger a public web search.
 resource "restful_resource" "public_context_source" {
@@ -36,10 +44,16 @@ resource "restful_resource" "public_context_source" {
   body = {
     name              = local.public_context_source_name
     kind              = "mcpServer"
-    description       = "Public web passages from Web IQ for ${var.project_name} (API key version ${var.web_iq_api_key_version})."
+    description       = "Public web passages from Web IQ for ${var.project_name}, read as the Foundry project identity."
     resultsProcessing = "rerank"
     mcpServerParameters = {
       serverURL = local.web_iq_mcp_endpoint
+      # Keyless: Agent Service authenticates each agent's call through the project's web-iq connection. No key or
+      # header is stored, and a retrieval that doesn't come from an agent can't authenticate.
+      authentication = {
+        kind                        = "foundryConnection"
+        foundryConnectionParameters = { connectionId = azapi_resource.web_iq_connection[count.index].name }
+      }
       # Only the web tool: the account is passage-only, and news, images and videos aren't the public context the
       # agents cite.
       tools = [{
@@ -48,16 +62,6 @@ resource "restful_resource" "public_context_source" {
         resultsProcessing = "none"
         maxOutputTokens   = 2000
       }]
-    }
-  }
-
-  # Write-only: the key reaches Search on create or update and is never stored in Terraform state or plans.
-  ephemeral_body = var.web_iq_api_key == null ? null : {
-    mcpServerParameters = {
-      authentication = {
-        kind                    = "storedHeaders"
-        storedHeadersParameters = { headers = { "x-apikey" = var.web_iq_api_key } }
-      }
     }
   }
 

@@ -17,14 +17,11 @@ app_image_tag = null
 
 # Web IQ is deployed with every platform. Set true only after accepting its terms.
 # Read preparation.md: paid subscription, public global service,
-# preview terms and manual portal AppID linking. The with-IQ agent's Web IQ tool
-# reads public context through its own knowledge base.
+# preview terms and manual portal onboarding. The with-IQ agent's Web IQ tool
+# reads public context through its own knowledge base, keyless: Foundry calls Web IQ
+# as the project identity, once you bind that identity's client ID (the web_iq
+# output's client_id, after knowledge setup) to the account's AppID in the Web IQ portal.
 web_iq_terms_accepted = false
-# The runner's public-only search probe reads WEB_IQ_API_KEY from the environment.
-# After knowledge setup, the runner also passes it to Terraform as the write-only
-# web_iq_api_key for the public-context knowledge source. After rotating the key, increment:
-# web_iq_api_key_version = 2
-# Never put that key in tfvars, source control or the browser app.
 
 # Work IQ, the with-IQ agent's mail tool, reads each user's own mail as that user. Set true only
 # with a Microsoft 365 mailbox per user, a Copilot Credits spending policy covering the Work IQ

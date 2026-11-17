@@ -19,7 +19,7 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 - **Seed data:** a fictional book portfolio: 8 titles, 18 editions, 26 weeks of sales, stock, public signals and campaigns, the latest week's signals and decision options computed from them, and `Files/documents/starter.txt` ([data contract](scenario/data/README.md)).
 - **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, public-context, Fabric IQ, Application Insights and, only with Work IQ, Work IQ connections.
 - **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, a check-only knowledge base with the live ontology source, and the Web IQ public-context source and knowledge base.
-- **Web IQ:** global G3 account; portal AppID/key setup is manual.
+- **Web IQ:** global G3 account, called keyless as the Foundry project identity; linking the AppID and binding that identity in the portal is manual.
 - **Prompt agents:** `<project>-with-iq`, with the Fabric IQ, Foundry IQ, Web IQ and, opt-in, Work IQ mail tools, and `<project>-without-iq`, with none, published by the deployment runner.
 - **Web app:** the React page and its Node server in one container, at a public HTTPS URL.
 - **Tracing:** one Application Insights operation per question, from the web app's server through the agent run to each tool call; Foundry's message content goes only to a protected table the deployer can read.
@@ -44,7 +44,7 @@ Installation does not sign in, grant consent or enable optional runtime integrat
 **Before deployment:** complete the [manual preparation checklist](preparation.md)
 for permissions, tenant settings, licenses, sign-ins and approvals.
 [Web IQ runtime details](docs/runtime-integration.md#web-iq) cover the account,
-public-search probe and the agents' public-context tool.
+keyless route and the agents' public-context tool.
 
 ## Platform at a glance
 
@@ -114,7 +114,7 @@ Remaining cleanup:
 
 - **Fabric tenant admin:** permanently delete the retained DEV/TEST workspaces; [retention still applies](https://learn.microsoft.com/en-us/fabric/admin/workspace-retention).
 - **Microsoft Entra:** deleted app registrations stay under **Deleted applications** for 30 days; restore or permanently delete them there.
-- **Web IQ portal:** revoke keys and remove the AppID/profile.
+- **Web IQ portal:** unbind the project identity and remove the AppID/profile.
 - **Preserved:** GitHub repository, local files/state, backend storage, tenant settings, licenses and external source data.
 
 [Teardown details](docs/development.md#delete-the-environment)

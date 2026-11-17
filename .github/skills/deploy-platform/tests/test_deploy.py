@@ -317,50 +317,12 @@ class PlanTests(unittest.TestCase):
         for call in native.call_args_list:
             self.assertNotIn("TF_VAR_github_token", call.kwargs["env"])
 
-    def test_after_knowledge_setup_plans_and_applies_carry_the_web_iq_key_and_teardown_does_not(self):
-        root = make_root(self)
-        shell = FakeShell(plan_rules([("restful_resource.public_context_source[0]", ["create"])]))
-        ctx = make_context(self, root, shell, yes=True)
+    def test_knowledge_plans_and_applies_need_no_web_iq_key(self):
+        shell = FakeShell(plan_rules([("azapi_resource.web_iq_connection[0]", ["create"])]))
+        ctx = make_context(self, make_root(self), shell, yes=True)
         ctx.cache["variables"]["knowledge_lakehouse_id"] = LAKEHOUSE
         ctx.environ = {}
-        with self.assertRaisesRegex(deploy.Waiting, "Web IQ key"):
-            deploy.converge(ctx, "knowledge")
-        self.assertFalse(shell.calls)
-        ctx.environ = {"TF_VAR_web_iq_api_key": "ambient"}
-        with self.assertRaisesRegex(deploy.Blocked, "Unset TF_VAR_web_iq_api_key"):
-            deploy.converge(ctx, "knowledge")
-        ctx.environ = {"WEB_IQ_API_KEY": "key with space"}
-        with self.assertRaisesRegex(deploy.Blocked, "invalid HTTP header characters"):
-            deploy.converge(ctx, "knowledge")
-        ctx.environ = {"WEB_IQ_API_KEY": " web-iq-key "}
-        with mock.patch.object(shell, "run", wraps=shell.run) as native:
-            self.assertEqual(deploy.converge(ctx, "knowledge"), "applied")
-            keyed = {call.args[0][2]: call.kwargs["env"].get("TF_VAR_web_iq_api_key") for call in native.call_args_list
-                     if call.args[0][2] in ("plan", "apply")}
-            self.assertTrue(all("WEB_IQ_API_KEY" not in call.kwargs["env"] for call in native.call_args_list))
-        self.assertEqual(keyed, {"plan": "web-iq-key", "apply": "web-iq-key"})
-        self.assertNotIn("web-iq-key", ctx.state.path.read_text(encoding="utf-8"))
-
-    def test_teardown_and_earlier_plans_never_carry_the_web_iq_key(self):
-        # An ephemeral variable set at plan must be set at apply, so it can't depend on whether the shell has the key.
-        for phase, lakehouse, changes in (("destroy", LAKEHOUSE, [("fabric_workspace.dev", ["delete"])]),
-                                          ("platform", None, [("azurerm_resource_group.main", ["create"])])):
-            with self.subTest(phase=phase):
-                shell = FakeShell(plan_rules(changes))
-                ctx = make_context(self, make_root(self), shell, allow_delete=True)
-                ctx.args.approve = {}
-                ctx.cache["variables"]["knowledge_lakehouse_id"] = lakehouse
-                ctx.environ = {"WEB_IQ_API_KEY": "key with space"}
-                with mock.patch.object(shell, "run", wraps=shell.run) as native:
-                    with self.assertRaises(deploy.NeedsApproval) as approval:
-                        deploy.converge(ctx, phase)
-                    ctx.args.approve = {phase: approval.exception.approval["sha256"][:12]}
-                    ctx.environ = {}
-                    self.assertEqual(deploy.converge(ctx, phase), "applied")
-                for call in native.call_args_list:
-                    self.assertNotIn("TF_VAR_web_iq_api_key", call.kwargs["env"])
-                    self.assertNotIn("WEB_IQ_API_KEY", call.kwargs["env"])
-                self.assertEqual(len(shell.matching(terraform("apply"))), 1)
+        self.assertEqual(deploy.converge(ctx, "knowledge"), "applied")
 
     def test_opted_in_git_requires_a_pat_before_planning(self):
         root = make_root(self)
@@ -974,11 +936,6 @@ class ScenarioContractTests(unittest.TestCase):
         self.assertEqual(deploy.knowledge.description_text(deploy.SCENARIO.registration_description),
                          deploy.SCENARIO.registration_description)
         self.assertIn("indexed starter document", deploy.SCENARIO.document_question)
-        # The billable public-context question names no title, author or other private detail.
-        question = deploy.SCENARIO.public_context_question
-        self.assertIn("literary fiction", question.lower())
-        for private in (*deploy.SCENARIO.expected_facts, "Mara Ellison", "title-", lakehouse, ontology):
-            self.assertNotIn(private, question)
         for fact in deploy.SCENARIO.expected_facts:
             self.assertIn(fact, deploy.SCENARIO.app_question)
         self.assertIn(deploy.SCENARIO.app_question, deploy.APP_NEXT)
@@ -1418,17 +1375,6 @@ class ReadinessTests(unittest.TestCase):
                       deploy.ontology_evidence(snapshot, source, deploy.SCENARIO.expected_facts)[0])
         self.assertEqual(deploy.document_evidence(snapshot, "demo-documents")[0], [])
 
-    def test_public_context_evidence_needs_a_cited_web_iq_call(self):
-        cited = {"activity": [{"type": "mcpServer", "knowledgeSourceName": "demo-web",
-                               "mcpServerArguments": {"toolName": "web"}}],
-                 "references": [{"type": "mcpServer", "toolName": "web", "sourceData": {"title": "Pump care"}}]}
-        self.assertEqual(deploy.public_context_evidence(cited, "demo-web"), ([], {"activity": 1, "references": 1}))
-        failed = {"activity": [{"type": "mcpServer", "knowledgeSourceName": "demo-web", "error": "401"}], "references": []}
-        self.assertEqual(deploy.public_context_evidence(failed, "demo-web")[0],
-                         ["the Web IQ tool call reported an error", "no cited Web IQ reference"])
-        self.assertIn("no mcpServer activity for demo-web",
-                      deploy.public_context_evidence({"activity": [{"type": "indexedOneLake"}]}, "demo-web")[0])
-
     def test_verify_waits_for_every_folder_source_and_asks_each_question_of_its_own_base(self):
         sources = {"documents": "demo-documents", "manuals": "demo-manuals", "unattached": "demo-unattached"}
         ready = {
@@ -1437,12 +1383,11 @@ class ReadinessTests(unittest.TestCase):
             "knowledge_base_name": "demo-knowledge", "ontology_check_knowledge_base_name": "demo-ontology-check",
             "knowledge_source_names": sources,
             "ontology_knowledge_sources": {deploy.SCENARIO.registration: {"knowledge_source_name": "demo-scenario-ontology"}},
-            "public_context_knowledge_base_name": "demo-public-context", "public_context_knowledge_source_name": "web",
         }
         ctx = make_context(self, make_root(self))
         ctx.cache["outputs"] = ready
         with mock.patch.object(deploy, "wait_ingestion", return_value={"synchronizations": 1}) as ingestion, \
-                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ verified"), \
+                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ wired") as web_iq, \
                 mock.patch.object(deploy, "verify_work_iq", return_value={
                     "enabled": True, "connection": "work-iq", "consent": "granted"}) as work_iq, \
                 mock.patch.object(deploy, "prove_retrieval", return_value={"references": 1}) as retrieval:
@@ -1455,7 +1400,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual([call.args[1:] for call in ingestion.call_args_list],
                          [(f"https://srch.search.windows.net/knowledgesources/{name}/status?api-version=v1", name)
                           for _, name in sorted(sources.items())])
-        ontology, document, public = (call.args[1:4] for call in retrieval.call_args_list)
+        ontology, document = (call.args[1:4] for call in retrieval.call_args_list)
         self.assertEqual(ontology[0], "https://srch.search.windows.net/knowledgebases/demo-ontology-check/retrieve?api-version=v1")
         self.assertEqual((ontology[1], ontology[2]["kind"], ontology[2]["knowledgeSourceName"]),
                          (deploy.SCENARIO.ontology_question, "fabricOntology", "demo-scenario-ontology"))
@@ -1463,8 +1408,10 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual((document[1], document[2]["kind"], document[2]["knowledgeSourceName"]),
                          (deploy.SCENARIO.document_question, "indexedOneLake", "demo-documents"))
         # Only the agents' minimal-effort knowledge base takes the question as a search intent.
-        self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True, False])
-        self.assertTrue(public[0].startswith("https://srch.search.windows.net/knowledgebases/demo-public-context/retrieve?"))
+        self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True])
+        # Web IQ's source authenticates only through Agent Service, so the runner checks its wiring, not a retrieval.
+        self.assertEqual(web_iq.call_args.args[1:], ("https://srch.search.windows.net", "v1"))
+        self.assertIn("Web IQ wired", report)
         self.assertIn("ingestion succeeded for 3 OneLake folder source(s)", report)
         self.assertIn("live ontology retrieval through demo-ontology-check and document retrieval through demo-knowledge",
                       report)
@@ -2620,7 +2567,6 @@ class AgentAndAppTests(unittest.TestCase):
         http.add("GET", r"/api/config$", reply(body={"mock": False, "clientId": client or self.CLIENT, "tenantId": TENANT}))
         ctx = make_context(self, root, FakeShell(rules), http)
         ctx.initialized = True
-        ctx.environ["WEB_IQ_API_KEY"] = "web-iq-key"
         ctx.cache["outputs"] = self.outputs()
         ctx.state.section("target").update(tenant_id=TENANT, subscription_id="sub", user_object_id="user")
         return ctx, tag
@@ -2888,19 +2834,27 @@ class RetryTests(unittest.TestCase):
 
 class WebIqTests(unittest.TestCase):
     RESOURCE_ID = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.WebIQ/accounts/demo"
+    CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    KEYLESS = {"kind": "foundryConnection", "foundryConnectionParameters": {"connectionId": "web-iq"}}
 
-    def web_context(self, *, key=None, state="Succeeded", search=None):
+    def web_context(self, *, state="Succeeded", authentication=KEYLESS, bound=None, source=None):
         http = FakeHttp()
         http.add("GET", r"/providers/Microsoft\.WebIQ/accounts/demo\?api-version=2026-06-01-preview$",
                  reply(body={"id": self.RESOURCE_ID, "properties": {"provisioningState": state}}))
-        if search:
-            http.add("POST", r"^https://api\.microsoft\.ai/v3/search/web$", search)
-        ctx = make_context(self, make_root(self), FakeShell([TOKEN_RULE]), http)
-        ctx.cache["outputs"] = {"web_iq": {"resource_id": self.RESOURCE_ID}}
+        http.add("GET", r"^https://demo\.search\.windows\.net/knowledgesources/demo-web\?api-version=test$",
+                 source or reply(body={"name": "demo-web", "kind": "mcpServer", "mcpServerParameters": {
+                     "serverURL": "https://api.microsoft.ai/v3/mcp", "authentication": authentication}}))
+        ctx = make_context(self, make_root(self), FakeShell([TOKEN_RULE]), http, web_iq_bound=bound)
+        ctx.cache["outputs"] = {
+            "web_iq": {"resource_id": self.RESOURCE_ID, "mcp_endpoint": "https://api.microsoft.ai/v3/mcp",
+                       "connection_name": "web-iq", "client_id": self.CLIENT},
+            "public_context_knowledge_source_name": "demo-web",
+        }
         ctx.state.section("target")["subscription_id"] = "sub"
-        if key:
-            ctx.environ["WEB_IQ_API_KEY"] = key
         return ctx
+
+    def verify(self, ctx):
+        return deploy.verify_web_iq(ctx, "https://demo.search.windows.net", "test")
 
     def test_missing_web_iq_output_blocks_readiness_without_cloud_calls(self):
         ctx = make_context(self, make_root(self))
@@ -2908,7 +2862,7 @@ class WebIqTests(unittest.TestCase):
             with self.subTest(outputs=outputs):
                 ctx.cache["outputs"] = outputs
                 with self.assertRaisesRegex(deploy.Blocked, "Terraform outputs are missing: web_iq"):
-                    deploy.verify_web_iq(ctx)
+                    self.verify(ctx)
                 self.assertFalse(ctx.http.calls)
                 self.assertFalse(ctx.shell.calls)
 
@@ -2923,7 +2877,8 @@ class WebIqTests(unittest.TestCase):
             ctx.shell = FakeShell([(command("az", "provider", "show"), deploy.Result(0, json.dumps(provider)))])
             values = {"web_iq_terms_accepted": True}
             if succeeds:
-                self.assertIn("portal AppID linking remains manual", deploy.check_web_iq(ctx, "sub", values))
+                self.assertIn("binding the Foundry project identity to the account's AppID in the Web IQ portal "
+                              "remains manual", deploy.check_web_iq(ctx, "sub", values))
             else:
                 with self.assertRaisesRegex(deploy.Blocked, "pinned Web IQ accounts API"):
                     deploy.check_web_iq(ctx, "sub", values)
@@ -2946,86 +2901,91 @@ class WebIqTests(unittest.TestCase):
                 deploy.phase_verify(ctx)
         self.assertEqual(retrieval.call_count, 2)
         self.assertNotIn("dev_ready_at", ctx.state.section("verify"))
-        ctx.cache["outputs"].update(public_context_knowledge_base_name="demo public", public_context_knowledge_source_name="web")
         with mock.patch.object(deploy, "wait_ingestion", return_value={}), \
-                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ verified"), \
+                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ wired"), \
                 mock.patch.object(deploy, "verify_work_iq",
                                   return_value={"enabled": True, "connection": "work-iq", "consent": "granted"}), \
                 mock.patch.object(deploy, "prove_retrieval", return_value={"references": 2}) as retrieval:
-            self.assertIn("Web IQ public context retrieved through Foundry IQ (2 cited references)", deploy.phase_verify(ctx))
-        url, question, parameters = retrieval.call_args.args[1:4]
-        self.assertTrue(url.startswith("https://demo.search.windows.net/knowledgebases/demo%20public/retrieve?api-version="))
-        self.assertEqual((question, parameters["kind"], retrieval.call_args.kwargs), (
-            deploy.SCENARIO.public_context_question, "mcpServer", {"attempts": 1}))
+            self.assertIn("; Web IQ wired; ", deploy.phase_verify(ctx))
+        self.assertEqual(retrieval.call_count, 2)
         self.assertIn("dev_ready_at", ctx.state.section("verify"))
 
-    def test_a_provisioned_account_waits_for_portal_onboarding_not_automatic_keys(self):
+    def test_a_keyless_route_waits_for_the_operator_to_confirm_the_binding(self):
         ctx = self.web_context()
-        with self.assertRaisesRegex(deploy.Waiting, "authenticated search is unverified") as stop:
-            deploy.verify_web_iq(ctx)
-        self.assertIn(deploy.WEB_IQ_PORTAL, " ".join(stop.exception.next_steps))
-        self.assertEqual(ctx.state.section("web_iq")["status"], "onboarding_pending")
-        self.assertFalse(ctx.http.posts("search/web"))
+        with self.assertRaisesRegex(deploy.Waiting, "confirmed binding the Foundry project identity") as stop:
+            self.verify(ctx)
+        steps = " ".join(stop.exception.next_steps)
+        for expected in (deploy.WEB_IQ_PORTAL, self.RESOURCE_ID, f"enter {self.CLIENT}", f"--web-iq-bound {self.CLIENT}"):
+            self.assertIn(expected, steps)
+        receipt = ctx.state.section("web_iq")
+        self.assertEqual((receipt["status"], receipt["connection"], receipt["client_id"]),
+                         ("binding_unconfirmed", "web-iq", self.CLIENT))
+        # Nothing billable: the runner never calls Web IQ itself, only reads the account and the source.
+        self.assertEqual([call[0] for call in ctx.http.calls], ["GET", "GET"])
 
-    def test_provisioning_and_target_failures_never_send_the_key(self):
+    def test_the_confirmation_must_name_the_identity_and_lasts_only_for_it(self):
+        ctx = self.web_context(bound="dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        with self.assertRaisesRegex(deploy.Blocked, f"client\\) ID is {self.CLIENT}"):
+            self.verify(ctx)
+        self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+        ctx.args.web_iq_bound = self.CLIENT
+        message = self.verify(ctx)
+        self.assertIn(f"through the web-iq connection as the Foundry project identity ({self.CLIENT})", message)
+        self.assertIn("Web IQ retrieval and agent/app integration remain unverified", message)
+        receipt = ctx.state.section("web_iq")
+        self.assertEqual((receipt["status"], receipt["bound_client_id"], receipt["retrieval"]),
+                         ("bound_unverified", self.CLIENT, "unverified"))
+        # A later run keeps the confirmation, until the project identity, and so its client ID, changes.
+        ctx.args.web_iq_bound = None
+        self.assertEqual(self.verify(ctx), message)
+        ctx.cache["outputs"]["web_iq"]["client_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        with self.assertRaises(deploy.Waiting):
+            self.verify(ctx)
+        self.assertEqual(deploy.parse_arguments(["up", "--web-iq-bound", self.CLIENT.upper()]).web_iq_bound,
+                         self.CLIENT)
+        with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(io.StringIO()):
+            deploy.parse_arguments(["up", "--web-iq-bound", "not-a-client-id"])
+        self.assertEqual(stop.exception.code, deploy.USAGE)
+
+    def test_only_the_named_connection_without_stored_headers_is_keyless(self):
+        # Search returns the other kinds' parameters as nulls.
+        ctx = self.web_context(authentication={**self.KEYLESS, "storedHeadersParameters": None}, bound=self.CLIENT)
+        self.assertIn("wired keylessly", self.verify(ctx))
+        stored = {"headers": {"x-apikey": "<redacted>"}}
+        for authentication in ({"kind": "storedHeaders", "storedHeadersParameters": stored},
+                               {**self.KEYLESS, "storedHeadersParameters": stored},
+                               {"kind": "foundryConnection", "foundryConnectionParameters": {"connectionId": "other"}},
+                               {"kind": "foundryConnection", "foundryConnectionParameters": None},
+                               None):
+            with self.subTest(authentication=authentication):
+                ctx = self.web_context(authentication=authentication, bound=self.CLIENT)
+                with self.assertRaisesRegex(deploy.Blocked, "doesn't call Web IQ keylessly through the web-iq connection"):
+                    self.verify(ctx)
+                self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+
+    def test_provisioning_target_and_missing_route_failures_stop_before_the_binding(self):
         for state, error in (("Creating", deploy.Waiting), ("Failed", deploy.Blocked), ("Canceled", deploy.Blocked)):
-            ctx = self.web_context(key="private-key", state=state)
+            ctx = self.web_context(state=state, bound=self.CLIENT)
             with self.assertRaises(error):
-                deploy.verify_web_iq(ctx)
-            self.assertFalse(ctx.http.posts("search/web"))
-            self.assertNotIn("private-key", json.dumps(ctx.http.calls))
-        ctx = self.web_context(key="private-key")
+                self.verify(ctx)
+            self.assertFalse([call for call in ctx.http.calls if "/knowledgesources/" in call[1]])
+        for missing in ("connection_name", "client_id"):
+            ctx = self.web_context(bound=self.CLIENT)
+            ctx.cache["outputs"]["web_iq"][missing] = None
+            with self.subTest(missing=missing), \
+                    self.assertRaisesRegex(deploy.Blocked, "no web-iq connection or Foundry project identity client ID"):
+                self.verify(ctx)
+        # The source's definition is an ordinary read: retried in transit, then a transient failure waits.
+        ctx = self.web_context(bound=self.CLIENT, source=reply(503))
+        with self.assertRaisesRegex(deploy.Waiting, "HTTP 503"):
+            self.verify(ctx)
+        self.assertEqual(ctx.http.attempts[-1], None)
+        self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+        ctx = self.web_context(bound=self.CLIENT)
         ctx.cache["outputs"]["web_iq"]["resource_id"] = self.RESOURCE_ID.replace("/sub/", "/another/")
         with self.assertRaisesRegex(deploy.Blocked, "selected subscription"):
-            deploy.verify_web_iq(ctx)
+            self.verify(ctx)
         self.assertFalse(ctx.http.calls)
-
-    def test_invalid_header_characters_never_reach_http_or_error_output(self):
-        for key in ("private\nkey", "private key", "private\u0100key"):
-            ctx = self.web_context(key=key)
-            with self.assertRaisesRegex(deploy.Blocked, "invalid HTTP header characters") as stop:
-                deploy.verify_web_iq(ctx)
-            self.assertNotIn(key, str(stop.exception))
-            self.assertFalse(ctx.http.posts("search/web"))
-
-    def test_a_cited_live_probe_keeps_secrets_and_retrieved_content_out_of_receipts(self):
-        result = {"title": "Microsoft Web IQ", "url": "https://learn.microsoft.com/en-us/web-iq/",
-                  "content": "Grounding passage", "crawledAt": "2026-10-19T00:00:00Z"}
-        for dated in (True, False):
-            with self.subTest(dated=dated):
-                item = result if dated else {key: value for key, value in result.items() if key != "crawledAt"}
-                ctx = self.web_context(key="private-key", search=reply(body={"webResults": [item]}))
-                message = deploy.verify_web_iq(ctx)
-                self.assertIn("agent/app integration remain unverified", message)
-                receipt = ctx.state.section("web_iq")
-                self.assertEqual(receipt["status"], "search_verified")
-                self.assertEqual(receipt["dated_result_count"], int(dated))
-                post = [call for call in ctx.http.calls if call[0] == "POST"]
-                self.assertEqual(len(post), 1)
-                _, url, body, headers = post[0]
-                self.assertEqual(url, deploy.WEB_IQ_SEARCH)
-                self.assertEqual(headers, {"x-apikey": "private-key"})
-                self.assertEqual(body["query"], deploy.WEB_IQ_QUESTION)
-                self.assertEqual(body["contentFormat"], "passage")
-                self.assertEqual(body["safeSearch"], "strict")
-                for private in ("private-key", "Grounding passage"):
-                    self.assertNotIn(private, ctx.state.path.read_text(encoding="utf-8"))
-                    self.assertNotIn(private, " ".join(ctx.messages))
-
-    def test_errors_empty_results_and_missing_citations_are_not_search_success(self):
-        bad_results = ({}, {"webResults": []}, {"webResults": "bad"}, {"webResults": [None]},
-                       {"webResults": [{"title": "Title", "content": "Text", "url": "javascript:alert(1)"}]},
-                       {"webResults": [{"title": "Title", "url": "https://example.com"}]})
-        for response in (reply(401, {"message": "private-key"}), reply(403), reply(429), reply(500),
-                         *(reply(body=body) for body in bad_results)):
-            ctx = self.web_context(key="private-key", search=response)
-            ctx.state.section("web_iq").update(status="search_verified", verified_at="stale")
-            with self.assertRaises(deploy.Blocked) as stop:
-                deploy.verify_web_iq(ctx)
-            self.assertNotIn("private-key", str(stop.exception))
-            self.assertEqual(ctx.state.section("web_iq")["status"], "search_unverified")
-            self.assertNotIn("verified_at", ctx.state.section("web_iq"))
-            self.assertEqual(len(ctx.http.posts("search/web")), 1, "billable searches must not be retried")
 
 
 if __name__ == "__main__":

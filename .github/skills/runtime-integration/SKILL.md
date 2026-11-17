@@ -68,8 +68,9 @@ approval and a fresh full plan, especially after a partial deployment.
 
 ## 3. Prove identity, retrieval and isolation
 
-Start from the runner's evidence: its `verify` phase saves the ontology, document
-and public-context retrieval responses in `.artifacts/deploy/evidence/`, its
+Start from the runner's evidence: its `verify` phase saves the ontology and
+document retrieval responses in `.artifacts/deploy/evidence/` and checks the
+keyless Web IQ wiring, without a Web IQ call, its
 `agent` phase reads every agent back with its reviewed digest, and its `app` phase
 checks the deployed app's health and sign-in settings. None of them asks the agents
 a question. For the remaining gates in `docs/runtime-integration.md`:
