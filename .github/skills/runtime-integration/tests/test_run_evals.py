@@ -111,13 +111,15 @@ class JudgeTests(unittest.TestCase):
         self.assertIn(f"no Sources line cites {keys[1]}",
                       self.judge("options-and-approver", response(ONTOLOGY, knowledge, message(missing))))
 
-    def test_foundrys_own_citation_format_fails(self):
-        answer = ("**28 days of cover.** 【6:0†Reprint and stock policy】\n\nSources\n- [F1] Reprint and stock policy · §3"
-                  "\n\nSteps\n1. Retrieved the policy.")
+    def test_foundrys_own_citations_are_a_note_and_never_replace_a_marker(self):
         knowledge = call("foundry_iq_knowledge", "knowledge_base_retrieve", {"queries": ["cover"]})
-        problems = self.judge("reprint-cover-policy", response(knowledge, message(answer)))
-        self.assertIn("cites with Foundry's own 【…】 markers", problems)
-        self.assertIn("no [Fn] marker in the answer", problems)
+        cited = ("**A reprint should leave 28 days of cover, under the reprint and stock policy.** [F1 §3] 【6:1†source】"
+                 "\n\nSources\n- [F1] Reprint and stock policy · §3 【6:1†source】\n\nSteps\n1. Retrieved the policy.")
+        run = {"http_status": 200, **evals.parse_response(response(knowledge, message(cited)))}
+        self.assertEqual(evals.judge(CASES["reprint-cover-policy"], run, WEEK, DATA), [])
+        self.assertEqual(evals.notes(run), ["also cites with Foundry's own 【…】 markers, which the app drops"])
+        only = cited.replace(" [F1 §3]", "")
+        self.assertIn("no [Fn] marker in the answer", self.judge("reprint-cover-policy", response(knowledge, message(only))))
 
     def test_expected_facts_follow_the_week(self):
         week_27 = evals.judge(CASES["attention"], {"http_status": 200, **evals.parse_response(

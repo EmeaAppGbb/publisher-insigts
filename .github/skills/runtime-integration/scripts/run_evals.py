@@ -273,8 +273,6 @@ def judge(case, run, week, data):
     if case.get("no_markers") and (markers or listed):
         problems.append("source markers without tools")
     problems += [f"marker [{kind}{number}] has no Sources line" for kind, number in sorted(markers - listed)]
-    if "\u3010" in text:
-        problems.append("cites with Foundry's own \u3010…\u3011 markers")
     if text and steps is None and case.get("steps", True):
         problems.append("no Steps list")
     problems += [f"missing {item}" for item in includes(text, case.get("includes", []))
@@ -294,6 +292,14 @@ def judge(case, run, week, data):
         if not any(abs(value - known) < 0.005 for known in allowed):
             problems.append(f"{written} is not an amount the week's rows or the approved documents give")
     return problems
+
+
+def notes(run):
+    """What a reader should know about a run that doesn't fail it."""
+    found = []
+    if "\u3010" in run.get("text", ""):
+        found.append("also cites with Foundry's own \u3010…\u3011 markers, which the app drops")
+    return found
 
 
 def ask(endpoint, agent, case, token, timeout, send=post):
@@ -334,10 +340,13 @@ def evaluate(data, cases, week, endpoint, agents, token, timeout, send=post, log
             verdict = "fail" if problems else "pass"
         tools = ", ".join(f"{call['server']}{' (failed)' if call['error'] else ''}" for call in run.get("calls", []))
         log(f"{verdict.upper():13} {case['id']} ({case['variant']}, {run['seconds']} s){': ' + tools if tools else ''}")
+        remarks = notes(run)
         for problem in problems:
             log(f"{'':14}- {problem}")
+        for remark in remarks:
+            log(f"{'':14}note: {remark}")
         results.append({"id": case["id"], "variant": case["variant"], "agent": agent, "question": case["question"],
-                        "verdict": verdict, "problems": problems, "response_id": run.get("id"),
+                        "verdict": verdict, "problems": problems, "notes": remarks, "response_id": run.get("id"),
                         "seconds": run["seconds"], "http_status": run["http_status"], "status": run.get("status"),
                         "tool_calls": [{**call, "arguments": text_of(call["arguments"], 600)}
                                        for call in run.get("calls", [])],

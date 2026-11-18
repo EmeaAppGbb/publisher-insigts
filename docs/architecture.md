@@ -68,8 +68,9 @@ format, in three parts:
 | `[Web1]` | `[Web1] <page title> · <site> · <URL>` | Web IQ: public context |
 | `[W1]` | `[W1] Outlook · <sender> · <date> · <subject> · <link>` | Work IQ: a mail message |
 
-The agents never use Foundry's own `【1:2†source】` citations, and never write a
-marker for a tool they lack or didn't call. There is no JSON contract to validate.
+The instructions forbid Foundry's own `【1:2†source】` citations, and the app's parser
+drops any that slip through; the agents never write a marker for a tool they lack or
+didn't call. There is no JSON contract to validate.
 The app's parser, [`app/src/live/reply.ts`](../app/src/live/reply.ts), accepts the
 section headings plain, bold, as Markdown headings or with a trailing colon, and
 treats a reply without them as all answer. Its renderer escapes everything, allows

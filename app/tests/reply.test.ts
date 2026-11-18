@@ -107,6 +107,22 @@ test('source lines keep plain text and an http(s) URL; lines without a known mar
   ])
 })
 
+test("Foundry's own retrieval citations are dropped, and the reply's markers and sources stay", () => {
+  const parsed = parseReply([
+    '**A reprint should leave 28 days of cover after it lands.** [F1 §3] 【6:1†source】',
+    '',
+    'Sources',
+    '- [F1] Reprint and stock policy · §3 【6:1†source】',
+    '',
+    'Steps',
+    '1. Foundry IQ knowledge: asked about cover.【6:0†Reprint and stock policy】',
+  ].join('\n'))
+  assert.equal(parsed.answer, '**A reprint should leave 28 days of cover after it lands.** [F1 §3]')
+  assert.deepEqual(parsed.sources, [{ id: 'F1', kind: 'foundry', text: 'Reprint and stock policy · §3' }])
+  assert.deepEqual(parsed.steps, ['Foundry IQ knowledge: asked about cover.'])
+  assert.deepEqual(parsed.markers, [{ id: 'F1', kind: 'foundry', section: '3' }])
+})
+
 test('steps are the Steps list items, wrapped lines joined; unlisted lines are one step each', () => {
   assert.deepEqual(parseReply('A.\n\nSteps\n1. One\n   continued\n2) Two\n- Three\n\n---').steps, ['One continued', 'Two', 'Three'])
   assert.deepEqual(parseReply('A.\n\nSteps:\nAsked the ontology.\nFound one asset.').steps, ['Asked the ontology.', 'Found one asset.'])

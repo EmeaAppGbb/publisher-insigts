@@ -64,8 +64,9 @@ stores the token. Each with-IQ case takes up to a minute. Add `--work-iq` when W
 Your first Fabric IQ question needs your consent: the runner stops with exit code 3 and the consent link. Open it
 in a browser as the same user, accept, and run the evals again. It exits 1 when a case fails and 0 when all pass.
 
-Evidence goes to `.artifacts/evals/`, owner-only and ignored by Git: each case's question, verdict and problems, the
-response ID, the tool calls with their arguments and errors, and the answer. Read a failure there, or in the
+A note doesn't fail a case: for example, Foundry's own `【6:1†source】` citations beside the right marker, which the
+app's parser drops. Evidence goes to `.artifacts/evals/`, owner-only and ignored by Git: each case's question,
+verdict, problems and notes, the response ID, the tool calls with their arguments and errors, and the answer. Read a failure there, or in the
 [app's tool timeline](../../docs/runtime-integration.md#troubleshooting), before changing an agent.
 
 A pass is evidence for one user's agent route in one run. It doesn't prove the app's sign-in or registration,
