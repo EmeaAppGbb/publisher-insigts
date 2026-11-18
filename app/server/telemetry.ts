@@ -83,6 +83,8 @@ export interface AgentRunLabels {
   // The request's cid, a random UUID per question: it correlates the trace, the log line and Foundry's run.
   cid: string
   followUp: boolean
+  // Set when the request sent the user's decision on an approval request instead of a question.
+  decision?: 'approve' | 'reject'
 }
 
 function toolAttributes(call: ToolCall): Attributes {
@@ -108,6 +110,7 @@ export function traceAgentRun(labels: AgentRunLabels, run: (onTool: (call: ToolC
       'app.variant': labels.variant,
       'app.cid': labels.cid,
       'app.follow_up': labels.followUp,
+      ...(labels.decision ? { 'app.decision': labels.decision } : {}),
     },
   }, async (span) => {
     try {

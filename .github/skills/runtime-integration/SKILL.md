@@ -7,9 +7,10 @@ description: Preflight the shipped Foundry prompt agents and Container Apps web 
 
 Read `AGENTS.md`, `docs/runtime-integration.md`, `docs/development.md` and
 `docs/ontology-knowledge.md`. This is a bounded integration procedure, not a
-deployment wrapper. The `deploy-platform` runner's `agent` and `app` phases
-publish the shipped prompt agents and build and deploy the web app; use this skill
-for the preflight, the remaining shell evidence, access questions and diagnosis.
+deployment wrapper. The `deploy-platform` runner's `reprint`, `agent` and `app`
+phases deploy the reprint request server, publish the shipped prompt agents and
+build and deploy the web app; use this skill for the preflight, the remaining shell
+evidence, access questions and diagnosis.
 
 ## 1. Choose the proof target
 
@@ -19,7 +20,8 @@ billable resources, Entra registrations and role assignments. Do not borrow
 another project's resources, connections or state without approval.
 
 Keep commands, configuration edits and state on that host. Use `deploy-platform`
-for infrastructure, Fabric bootstrap, the agents and the app, preserving its
+for infrastructure, Fabric bootstrap, the reprint request server, the agents and the
+app, preserving its
 consent, saved-plan, action-approval and state gates. A local single-user proof
 needs explicit state-retention acceptance; team/CI use requires secured remote
 state.
@@ -70,22 +72,28 @@ approval and a fresh full plan, especially after a partial deployment.
 
 Start from the runner's evidence: its `verify` phase saves the ontology and
 document retrieval responses in `.artifacts/deploy/evidence/` and checks the
-keyless Web IQ wiring, without a Web IQ call, its
+keyless Web IQ wiring, without a Web IQ call, its `reprint` phase waits until the
+reprint request server's `/readyz` shows that its own identity holds both KQL
+database roles, its
 `agent` phase reads every agent back with its reviewed digest, and its `app` phase
 checks the deployed app's health and sign-in settings. None of them asks the agents
-a question. For the remaining gates in `docs/runtime-integration.md`:
+a question or writes a reprint request. For the remaining gates in `docs/runtime-integration.md`:
 
 - **Evals.** From the deployment checkout, run
   `python3 .github/skills/runtime-integration/scripts/run_evals.py` (with `--week 27`
   after the demo advances a week). It asks every case in `scenario/evals/cases.json`
   as the Azure CLI user and judges each run's tool calls, markers, expected facts,
-  amounts in pounds and Web IQ queries. Exit code 3 means a tool needs this user's
-  consent: give the user the printed link to open and accept, then rerun. Read failures
+  amounts in pounds and Web IQ queries, and the reprint request a case proposes,
+  which it always rejects: it never approves. Exit code 3 means a tool needs this
+  user's consent, such as the reprint request tool's on the first with-IQ case after
+  the server is deployed: give the user the printed link to open and accept, then
+  rerun. Read failures
   in the owner-only `.artifacts/evals/` evidence. A pass covers one user's agent route,
   not the app's sign-in or isolation.
 
 - **Browser sign-in.** The user signs in at the `app` output's URL, asks the sample
-  question with IQ, accepts the Fabric IQ consent card once, asks again and gets
+  question with IQ, accepts each consent card once (Fabric IQ, and the reprint
+  request tool's, which asks to submit requests as them), asks again and gets
   The Glass Orchard and its forecast variance with a `[D1]` marker; then compares with **Ask both** and
   asks a follow-up. The runner's CLI token does not prove the app's registration,
   its consent or the redirect bridge.
@@ -93,11 +101,21 @@ a question. For the remaining gates in `docs/runtime-integration.md`:
   must return live rows as the user, the Foundry IQ call a cited passage of an
   approved document, the Web IQ query public terms only and, with Work IQ, the mail `fetch`
   the user's own mail. Never accept a `starter.txt` fact as live ontology evidence.
+- **Reprint request, without a write.** With-IQ runs list the reprint server's tool
+  with the user's token, without a failed `tools/list`, which proves the server's
+  token checks; `/readyz` proved its identity's roles. The user asks to submit a
+  reprint request, checks that the approval card shows the week's exact option values
+  and rejects it, and the answer says nothing was submitted: that proves the
+  approval route. Only a deliberate approval in the app proves a write, the demo's
+  own act, and DEV can't take it back. Never approve as a check or on the user's
+  behalf.
 - **End-user authorization.** With an explicitly approved second account, confirm
   that a user without a Foundry role receives HTTP 403, and that a user with the
   role but without Fabric access gets an explicit failure or unavailable-source
-  answer, never a document substitute. Grant nothing beyond the access model
-  without the user's approval.
+  answer, never a document substitute. A denied approval needs an account that
+  holds no approval role: its approval gets the server's `role_insufficient`
+  refusal, which records nothing. Grant nothing beyond the access model without the
+  user's approval.
 - **Isolation.** The second user must not be able to continue or read the first
   user's conversation through its response ID, or reach their mail. Until a second
   user has tried, report the shell as verified for one user, isolation not
@@ -105,7 +123,9 @@ a question. For the remaining gates in `docs/runtime-integration.md`:
 
 Keep the identity contract intact while proving it. The app's server verifies and
 forwards only the signed-in user's Foundry token; Fabric IQ uses its
-`UserEntraToken` connection and Work IQ its OAuth identity passthrough; the
+`UserEntraToken` connection, and the reprint request tool and Work IQ their OAuth
+identity passthrough; the reprint request server records an approved request as its
+own identity, which holds only Database Viewer and Ingestor on `BookSignals`; the
 Foundry IQ tool reads documents and the Web IQ tool calls Web IQ's MCP server
 through the `web-iq` connection, both with the project's managed identity. Never expose tokens in prompts, tool arguments, configuration, evidence
 or logs. Never switch to a shared, application or managed identity, widen a role,
@@ -127,15 +147,20 @@ layers before changing anything:
    Read the container app's revision status and its console logs in Log Analytics.
 4. Map the status: 401 is sign-in or token verification, 403 the user's Foundry
    role, 404 an unpublished agent or wrong project, 429 model quota, a failed
-   `tools/list` an allow-list that names a tool the server doesn't offer, and a
-   225-second timeout a slow tool.
+   `tools/list` an allow-list that names a tool the server doesn't offer or, for
+   `reprint_request`, a token the reprint server refuses, and a 225-second timeout a
+   slow tool. When the app fails a held call instead of showing its approval card,
+   the code is `approval_several` or `approval_unreadable`; a refused reprint request
+   names its cause, and the server's console log its code, such as
+   `role_insufficient`, `argument_mismatch`, `signal_not_open`, `already_requested`
+   or `store_unavailable`; a `/readyz` 503 carries the roles the identity holds.
 
 Fix the cause in source, Terraform or with the documented grant, then let the
-runner publish a new agent version or build and apply a new app revision. Never
-edit a live agent or container app by hand, recreate one to clear a failure,
-change the registration's redirect URIs in the portal or relax the server's token
-checks. If a native service cannot preserve the required identity, report the
-blocked capability and request an explicit design decision.
+runner publish a new agent version or build and apply a new app or reprint server
+revision. Never edit a live agent or container app by hand, recreate one to clear a
+failure, change the registration's redirect URIs in the portal or relax the app's
+or the reprint server's checks. If a native service cannot preserve the required
+identity, report the blocked capability and request an explicit design decision.
 
 Require all evidence in `docs/runtime-integration.md` before saying **shell
 ready**. Work IQ stays unverified without a tenant that meets its prerequisites.

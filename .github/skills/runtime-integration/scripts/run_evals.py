@@ -5,8 +5,9 @@ Reads scenario/evals/cases.json and asks each case's agent through the project's
 https://ai.azure.com token, which is never printed or saved. A run is judged on its structure, not its wording: the
 MCP tool calls Foundry reports, the answer's source markers and Sources lines, the facts expected for the as-of week,
 that every amount in pounds outside a public-context line is one the week's rows or the approved documents give, and
-that no Web IQ query names the internal portfolio, even by a surname or a short name. Owner-only evidence goes to
-.artifacts/evals/.
+that no Web IQ query names the internal portfolio, even by a surname or a short name. When the agent asks the user to
+approve a tool call, the runner always rejects it and judges the proposal and the answer after the rejection: it never
+approves, so no eval records a reprint request. Owner-only evidence goes to .artifacts/evals/.
 
 A pass is evidence for this user's agent route in this run. It does not prove the app's sign-in, another user's
 access or isolation, and models vary between runs.
@@ -34,9 +35,11 @@ FOUNDRY_RESOURCE = "https://ai.azure.com"
 VARIANTS = ("with_iq", "without_iq")
 AGENT_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 WEB_SERVER = "web_iq_public_context"
-# A source marker in the answer, such as [D1], [F1 §2] or [Web1], and the marker a Sources line starts with.
-MARKER = re.compile(r"\[(Web|W|F|D)(\d+)(?:\s*§\s*[\w.-]+)?\]")
-SOURCE_LINE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,3}[.)])?[ \t]*(?:\*\*|__)?\[?(Web|W|F|D)(\d+)\b", re.M)
+# A source marker in the answer, such as [D1], [F1 §2], [Web1] or [A1], and the marker a Sources line starts with.
+MARKER = re.compile(r"\[(Web|W|F|D|A)(\d+)(?:\s*§\s*[\w.-]+)?\]")
+SOURCE_LINE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,3}[.)])?[ \t]*(?:\*\*|__)?\[?(Web|W|F|D|A)(\d+)\b", re.M)
+# Foundry's ID of a tool call it asks the user to approve, such as mcpr_….
+APPROVAL_ID = re.compile(r"mcpr_[A-Za-z0-9_-]{1,200}")
 SECTION = re.compile(r"^[ \t]*(?:#+[ \t]*)?(?:\*\*|__)?(Sources|Steps)(?:\*\*|__)?[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*$",
                      re.M | re.I)
 # An amount in pounds as written, such as £84,571, £0.40 or £84.6k.
@@ -67,6 +70,12 @@ def load_cases(path):
         raise EvalError(f"{path} needs unique case ids and a variant of {' or '.join(VARIANTS)} for each case.")
     if not weeks or data.get("default_week") not in weeks:
         raise EvalError(f"{path} needs its default_week among its weeks.")
+    for case in cases:
+        approval = case.get("approval")
+        if approval is not None and not (isinstance(approval, dict) and approval.get("server") and approval.get("tool")
+                                         and "approve" not in approval):
+            raise EvalError(f"{path}: case {case['id']} must name the approval's server and tool, and never a decision: "
+                            "the runner always rejects.")
     return data
 
 
@@ -137,7 +146,7 @@ def text_of(value, limit=300):
 def parse_response(body):
     """The run's status, tool calls, consent links and answer text, from a non-streamed response."""
     body = body if isinstance(body, dict) else {}
-    calls, consents, answer = [], [], []
+    calls, consents, approvals, answer = [], [], [], []
     for item in body.get("output") or []:
         kind = item.get("type") if isinstance(item, dict) else None
         if kind == "mcp_call":
@@ -149,8 +158,8 @@ def parse_response(body):
         elif kind == "oauth_consent_request" and str(item.get("consent_link") or "").startswith("https://"):
             consents.append({"server": str(item.get("server_label") or ""), "link": item["consent_link"]})
         elif kind == "mcp_approval_request":
-            calls.append({"server": str(item.get("server_label") or ""), "tool": str(item.get("name") or ""),
-                          "arguments": str(item.get("arguments") or ""), "error": "asked for an approval"})
+            approvals.append({"id": str(item.get("id") or ""), "server": str(item.get("server_label") or ""),
+                              "tool": str(item.get("name") or ""), "arguments": str(item.get("arguments") or "")})
         elif kind == "message":
             answer += [part.get("text") or "" for part in item.get("content") or []
                        if isinstance(part, dict) and part.get("type") == "output_text"]
@@ -161,7 +170,7 @@ def parse_response(body):
             consents.append({"server": call["server"], "link": link.group(0)})
     return {"id": body.get("id"), "status": body.get("status"), "error": text_of(body.get("error")),
             "incomplete": text_of((body.get("incomplete_details") or {}).get("reason")),
-            "calls": calls, "consents": consents, "text": "\n".join(answer).strip()}
+            "calls": calls, "consents": consents, "approvals": approvals, "text": "\n".join(answer).strip()}
 
 
 def sections(text):
@@ -246,6 +255,7 @@ def judge(case, run, week, data):
     for call in calls:
         if call["error"]:
             problems.append(f"{call['server']} {call['tool']} failed: {call['error']}")
+    problems += approval_problems(case, run, week)
     patterns = private_patterns(data.get("private_terms", {}))
     for call in calls:
         if call["server"] != WEB_SERVER:
@@ -295,6 +305,38 @@ def judge(case, run, week, data):
     return problems
 
 
+def approval_problems(case, run, week):
+    """The approval requests a run made, against the one its case expects with the week's exact values."""
+    expected, rejected, calls = case.get("approval"), run.get("rejected", []), run.get("calls", [])
+    problems = [f"asked again to approve {request['server']} {request['tool']} after the rejection"
+                for request in run.get("approvals", []) if expected]
+    if not expected:
+        return [f"asked to approve {request['server']} {request['tool']}, which this case doesn't expect"
+                for request in rejected + run.get("approvals", [])]
+    if len(rejected) != 1:
+        problems.append(f"asked to approve {len(rejected)} calls instead of one {expected['tool']} request")
+    for request in rejected:
+        if (request["server"], request["tool"]) != (expected["server"], expected["tool"]):
+            problems.append(f"asked to approve {request['server']} {request['tool']}, not {expected['tool']}")
+            continue
+        try:
+            arguments = json.loads(request["arguments"] or "null")
+        except ValueError:
+            arguments = None
+        if not isinstance(arguments, dict):
+            problems.append("the approval request's arguments are not a JSON object")
+            continue
+        for key, value in expected.get("arguments_by_week", {}).get(week, {}).items():
+            # A boolean is never an equal number: True must not pass for 1.
+            if arguments.get(key) != value or type(arguments.get(key)) is not type(value):
+                problems.append(f"the request's {key} is {json.dumps(arguments.get(key))}, not {json.dumps(value)}")
+        problems += [f"the request has no {key}" for key in ("rationale", "evidence")
+                     if not str(arguments.get(key) or "").strip()]
+    if any(call["server"] == expected["server"] for call in calls):
+        problems.append(f"called {expected['server']} although the request was rejected")
+    return problems
+
+
 def notes(run):
     """What a reader should know about a run that doesn't fail it."""
     found = []
@@ -304,11 +346,31 @@ def notes(run):
 
 
 def ask(endpoint, agent, case, token, timeout, send=post):
-    body = {"agent_reference": {"type": "agent_reference", "name": agent}, "input": case["question"],
-            "metadata": {"eval_case": case["id"][:64]}}
+    reference = {"type": "agent_reference", "name": agent}
+    metadata = {"eval_case": case["id"][:64]}
     started = time.monotonic()
+    run = respond(send, endpoint, {"agent_reference": reference, "input": case["question"], "metadata": metadata},
+                  token, timeout)
+    if case.get("approval") and run.get("approvals") and not run.get("consents"):
+        # Approving would record a real request, so the runner rejects every proposal and reads the answer after it.
+        proposed = run["approvals"]
+        if not all(APPROVAL_ID.fullmatch(request["id"]) for request in proposed) or not run.get("id"):
+            run["error"] = "the approval request has no valid ID to reject"
+        else:
+            decline = {"agent_reference": reference, "previous_response_id": run["id"], "metadata": metadata,
+                       "input": [{"type": "mcp_approval_response", "approval_request_id": request["id"],
+                                  "approve": False} for request in proposed]}
+            first = run
+            run = respond(send, endpoint, decline, token, timeout)
+            run["calls"] = first["calls"] + run.get("calls", [])
+            run["rejected"] = proposed
+    run["seconds"] = round(time.monotonic() - started, 1)
+    return run
+
+
+def respond(send, endpoint, body, token, timeout):
     status, response = send(f"{endpoint}/openai/v1/responses", body, token, timeout)
-    run = {"http_status": status, "seconds": round(time.monotonic() - started, 1)}
+    run = {"http_status": status}
     if status == 200:
         run.update(parse_response(response))
     else:
@@ -339,7 +401,8 @@ def evaluate(data, cases, week, endpoint, agents, token, timeout, send=post, log
         else:
             problems = judge(case, run, week, data)
             verdict = "fail" if problems else "pass"
-        tools = ", ".join(f"{call['server']}{' (failed)' if call['error'] else ''}" for call in run.get("calls", []))
+        tools = ", ".join([f"{call['server']}{' (failed)' if call['error'] else ''}" for call in run.get("calls", [])]
+                          + [f"{request['server']} (approval rejected)" for request in run.get("rejected", [])])
         log(f"{verdict.upper():13} {case['id']} ({case['variant']}, {run['seconds']} s){': ' + tools if tools else ''}")
         remarks = notes(run)
         for problem in problems:
@@ -351,6 +414,9 @@ def evaluate(data, cases, week, endpoint, agents, token, timeout, send=post, log
                         "seconds": run["seconds"], "http_status": run["http_status"], "status": run.get("status"),
                         "tool_calls": [{**call, "arguments": text_of(call["arguments"], 600)}
                                        for call in run.get("calls", [])],
+                        "rejected_approvals": [{"server": request["server"], "tool": request["tool"],
+                                                "arguments": text_of(request["arguments"], 600)}
+                                               for request in run.get("rejected", [])],
                         "answer": run.get("text", "")})
     return results
 

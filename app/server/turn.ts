@@ -1,7 +1,10 @@
-// POST /api/turns: one question to one of the two agents, as the signed-in user. The server checks the user's token
-// before it reads anything else, accepts only { cid, variant, question, previousResponseId? }, asks the variant's
-// Foundry agent with the user's own token and streams each tool call and then the outcome as newline-delimited JSON.
-// The Foundry call runs in an invoke_agent span. Nothing the user asked or the agent answered is logged.
+// POST /api/turns: one question to one of the two agents, as the signed-in user, or the user's decision on a tool call
+// the with-IQ agent holds for approval. The server checks the user's token before it reads anything else, accepts
+// only { cid, variant, question, previousResponseId? } or { cid, variant, approval: { id, approve },
+// previousResponseId }, asks the variant's Foundry agent with the user's own token and streams each tool call and
+// then the outcome as newline-delimited JSON. A decision names only the approval request and the answer: Foundry
+// keeps the arguments the agent proposed, so the browser can't change them. The Foundry call runs in an invoke_agent
+// span. Nothing the user asked or the agent answered is logged.
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { QUESTION_LIMIT, iqOf, parseTurnRequest, type TurnEvent, type TurnOutcome } from '../src/live/protocol.ts'
 import type { Variant } from '../src/live/types.ts'
@@ -17,6 +20,8 @@ export interface ServerTurnLog {
   correlationId: string
   variant: Variant
   followUp: boolean
+  // Set when the turn sent the user's decision on an approval request instead of a question.
+  decision?: 'approve' | 'reject'
   outcome: TurnOutcome['status']
   code?: string
   elapsedMs: number
@@ -35,7 +40,7 @@ export interface TurnDependencies {
 
 // A question of QUESTION_LIMIT characters, each escaped as \uXXXX, with room for the other fields.
 const BODY_LIMIT = 16_384
-const BAD_REQUEST = `Send { cid, variant, question, previousResponseId? }: a lowercase UUID, with_iq or without_iq, a question of 1 to ${QUESTION_LIMIT} characters and, for a follow-up, Foundry's response ID.`
+const BAD_REQUEST = `Send { cid, variant, question, previousResponseId? }: a lowercase UUID, with_iq or without_iq, a question of 1 to ${QUESTION_LIMIT} characters and, for a follow-up, Foundry's response ID. To answer an approval request, send { cid, variant: "with_iq", approval: { id, approve }, previousResponseId } instead: its mcpr_ ID, true or false, and the ID of the response that holds it.`
 
 export function createTurnHandler(dependencies: TurnDependencies) {
   const { config, verify } = dependencies
@@ -73,17 +78,20 @@ export function createTurnHandler(dependencies: TurnDependencies) {
     // Keeps proxies from closing a quiet connection while a slow tool runs.
     const heartbeat = setInterval(() => write({ type: 'heartbeat' }), dependencies.heartbeatMs ?? 15_000)
     const started = clock()
-    const { cid, variant, question, previousResponseId } = request
+    const { cid, variant, previousResponseId } = request
     const agent = config.agents[variant]
     const followUp = previousResponseId !== undefined
+    const decision = request.approval ? (request.approval.approve ? 'approve' : 'reject') : undefined
+    const input = request.approval
+      ? { approval: request.approval, previousResponseId: request.previousResponseId }
+      : { question: request.question, ...(followUp ? { previousResponseId } : {}) }
     let outcome: TurnOutcome
     try {
-      outcome = await traceAgentRun({ agent, endpoint: config.projectEndpoint, variant, cid, followUp }, (traceTool) => ask({
+      outcome = await traceAgentRun({ agent, endpoint: config.projectEndpoint, variant, cid, followUp, ...(decision ? { decision } : {}) }, (traceTool) => ask({
         endpoint: config.projectEndpoint,
         agent,
         token: verified.token,
-        question,
-        ...(followUp ? { previousResponseId } : {}),
+        ...input,
         metadata: { cid, variant },
         signal: gone.signal,
         timeoutMs: config.turnTimeoutMs,
@@ -104,6 +112,7 @@ export function createTurnHandler(dependencies: TurnDependencies) {
       correlationId: cid,
       variant,
       followUp,
+      ...(decision ? { decision } : {}),
       outcome: outcome.status,
       ...(outcome.status === 'failed' && outcome.code ? { code: outcome.code } : {}),
       elapsedMs: Math.max(0, Math.round(clock() - started)),

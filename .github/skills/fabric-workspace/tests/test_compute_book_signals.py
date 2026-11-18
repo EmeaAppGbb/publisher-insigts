@@ -1,4 +1,5 @@
-"""ComputeBookSignals, run locally after SeedBooks against in-memory stand-ins for Spark, Delta and OneLake.
+"""ComputeBookSignals, run locally after SeedBooks against in-memory stand-ins for Spark, Delta, OneLake and the
+BookSignals KQL database.
 
 The figures are the fictional portfolio's storyline, which the evaluations also rely on. At the seeded week, 2
 November 2026, three decisions are material and The Glass Orchard's UK hardback risk is still emerging; one week
@@ -6,16 +7,20 @@ later it is material, with about 180,000 pounds of net revenue at risk.
 """
 
 import datetime
+import json
 import re
 import unittest
 
+from _kusto import KQL_DATABASE_ID, UTC, Eventhouse, failure, kql_tables
 from _lake import TABLES, Lake, modules
 from _support import OTHER_ID, WORKSPACE, run
 
 ONTOLOGY = WORKSPACE / "BooksOntology.Ontology"
 TMDL_TYPES = {"STRING": "string", "BIGINT": "int64", "DOUBLE": "double", "DATE": "dateTime", "TIMESTAMP": "dateTime"}
+KQL_TYPES = {"STRING": "string", "BIGINT": "long", "DOUBLE": "real", "DATE": "datetime", "TIMESTAMP": "datetime"}
 DERIVED = ("title_signals", "decision_options", "title_performance")
 UK_RISK = "sig-20261109-title-001-inv-ed-001-hb-uk"
+SEEDED_UK_RISK = "sig-20261102-title-001-inv-ed-001-hb-uk"
 
 
 def seed(lake, through_week=26):
@@ -39,6 +44,46 @@ def keyed(rows, key):
 
 def pick(row, *names):
     return {name: row[name] for name in names}
+
+
+def approved_request(**changes):
+    """The reprint server's record of an approved expedited reprint for the seeded week's UK hardback risk."""
+    request = {"request_id": "rr-20261102-title-001-inv-ed-001-hb-uk", "signal_id": SEEDED_UK_RISK,
+               "option_id": f"{SEEDED_UK_RISK}-expedite", "title_id": "title-001", "title_name": "The Glass Orchard",
+               "edition_id": "ed-001-hb", "territory": "UK", "quantity": 20000, "expedited": "Yes",
+               "investment_gbp": 50000, "rationale": "Cover the gap before the standard lead time",
+               "evidence": "[D1] [F1]", "required_approver": "Publishing director",
+               "approver_role": "Publishing director", "approver_name": "A. Executive",
+               "approver_object_id": "12121212-1212-4212-8212-121212121212",
+               "approved_at": datetime.datetime(2026, 11, 3, 9, 30, tzinfo=UTC), "status": "Approved",
+               "as_of_week": datetime.datetime(2026, 11, 2, tzinfo=UTC)}
+    request.update(changes)
+    return request
+
+
+def kql_columns(schema):
+    """A lakehouse schema's (column, KQL type) pairs."""
+    return [(name, KQL_TYPES[kind]) for name, kind in re.findall(r"(\w+) (\w+)", schema)]
+
+
+def in_kql(row, schema, run_row):
+    """A lakehouse row as BookSignals holds it for a run: dates at midnight UTC, an empty string for a null string."""
+    kinds = dict(re.findall(r"(\w+) (\w+)", schema))
+    held = {name: "" if value is None and kinds[name] == "STRING" else
+            datetime.datetime.combine(value, datetime.time(), UTC) if value and kinds[name] == "DATE" else value
+            for name, value in row.items()}
+    return dict(held, **pick(run_row, "run_id", "computed_at"))
+
+
+def plan_groups():
+    """The Bootstrap plan's groups by name: logical ID, dependencies, the items its actions run and their parameters."""
+    plan = (WORKSPACE / "Bootstrap.DeploymentPlan" / "plan.yml").read_text(encoding="utf-8")
+    return {block.splitlines()[0]: {
+        "logical_id": re.search(r"(?m)^    logicalId: (\S+)$", block)[1],
+        "depends_on": re.findall(r"(?m)^      - groupName: (\S+)$", block),
+        "runs": re.findall(r"(?m)^          logicalId: (\S+)$", block),
+        "parameters": dict(re.findall(r"(?m)^            - name: (\w+)\n              value: (.+)$", block)),
+    } for block in re.split(r"(?m)^  - name: ", plan)[1:]}
 
 
 class StorylineTests(unittest.TestCase):
@@ -184,6 +229,183 @@ class RunTests(unittest.TestCase):
             compute(lake)
         with self.assertRaisesRegex(ValueError, "outside the current workspace"):
             compute(Lake(), lakehouse_workspace=OTHER_ID)
+
+
+def lakehouse_columns(lake, name):
+    return re.findall(r"(\w+) [A-Z]+", lake.tables[f"{TABLES}/{name}"]["ddl"])
+
+
+def kusto_calls(eventhouse):
+    """The csl of every Kusto request after the database name is resolved."""
+    return [csl for endpoint, _, csl in eventhouse.calls if endpoint != "fabric" and csl != ".show databases"]
+
+
+class KqlTests(unittest.TestCase):
+    """The run copies BookSignals' approved requests into the lakehouse and appends itself to BookSignals."""
+
+    def test_an_approved_request_is_copied_once_and_actions_its_risk(self):
+        eventhouse, lake = Eventhouse(), Lake()
+        eventhouse.add("reprint_requests", approved_request())
+        seed(lake)
+        compute(lake, eventhouse=eventhouse)
+        copied = [pick(approved_request(), *lakehouse_columns(lake, "reprint_requests"))]
+        self.assertEqual(lake.rows("reprint_requests"), copied)
+        self.assertEqual(keyed(lake.rows("title_signals"), "signal_id")[SEEDED_UK_RISK]["status"], "Actioned")
+        start = len(lake.log)
+        compute(lake, eventhouse=eventhouse)
+        self.assertEqual(lake.rows("reprint_requests"), copied, "a rerun inserts nothing")
+        self.assertEqual(lake.log[start:], [("overwrite", f"{TABLES}/{name}") for name in DERIVED])
+        # A lakehouse row with the request's ID is kept as it is, even one approved before the risk began.
+        lake = Lake()
+        seed(lake)
+        earlier = dict(copied[0], approver_name="B. Planner", approved_at=datetime.datetime(2026, 10, 1, 9, 0),
+                       status="Submitted")
+        lake.tables[f"{TABLES}/reprint_requests"]["rows"].append(tuple(earlier.values()))
+        compute(lake, eventhouse=eventhouse)
+        self.assertEqual(lake.rows("reprint_requests"), [earlier])
+        self.assertEqual(keyed(lake.rows("title_signals"), "signal_id")[SEEDED_UK_RISK]["status"], "Open")
+
+    def test_requests_are_not_copied_into_a_table_with_other_columns(self):
+        eventhouse, lake = Eventhouse(), Lake()
+        eventhouse.add("reprint_requests", approved_request())
+        seed(lake)
+        lake.tables[f"{TABLES}/reprint_requests"]["ddl"] = "request_id STRING, status STRING"
+        start = len(lake.log)
+        with self.assertRaisesRegex(ValueError, "Existing schema differs from the reprint request schema"):
+            compute(lake, eventhouse=eventhouse)
+        self.assertEqual((lake.log[start:], lake.rows("reprint_requests")), ([], []))
+        self.assertFalse([csl for csl in kusto_calls(eventhouse) if csl.startswith(".append")])
+
+    def test_each_run_appends_its_rows_then_one_signal_runs_row(self):
+        eventhouse, lake = Eventhouse(), Lake()
+        seed(lake)
+        for count in (1, 2):
+            namespace, _ = compute(lake, eventhouse=eventhouse)
+            runs = eventhouse.rows("signal_runs")
+            self.assertEqual(len(runs), count, "every run appends one complete run")
+            latest = runs[-1]
+            self.assertEqual(pick(latest, "as_of_week", "title_signals", "decision_options"), {
+                "as_of_week": datetime.datetime(2026, 11, 2, tzinfo=UTC), "title_signals": 10, "decision_options": 7})
+            schemas = dict(namespace["DERIVED"])
+            for name in ("title_signals", "decision_options"):
+                rows = [row for row in eventhouse.rows(name) if row["run_id"] == latest["run_id"]]
+                self.assertEqual(rows, [in_kql(row, schemas[name], latest) for row in lake.rows(name)], name)
+        self.assertEqual([csl.split(" ", 2)[1] for csl in kusto_calls(eventhouse) if csl.startswith(".append")],
+                         ["title_signals", "decision_options", "signal_runs"] * 2)
+        first, second = eventhouse.rows("signal_runs")
+        self.assertNotEqual(first["run_id"], second["run_id"])
+        self.assertLessEqual(first["computed_at"], second["computed_at"])
+
+    def test_the_kusto_database_is_found_by_its_item_id_or_its_display_name(self):
+        for database_name in (KQL_DATABASE_ID, "BookSignals"):
+            eventhouse, lake = Eventhouse(database_name), Lake()
+            seed(lake)
+            with self.subTest(database_name=database_name):
+                compute(lake, eventhouse=eventhouse)
+                self.assertEqual({db for endpoint, db, _ in eventhouse.calls if endpoint != "fabric" and db},
+                                 {database_name})
+                self.assertEqual(len(eventhouse.rows("signal_runs")), 1)
+
+    def test_a_missing_or_foreign_kql_database_is_refused_before_anything_is_written(self):
+        missing, foreign, unlisted = Eventhouse(), Eventhouse(), Eventhouse()
+        del missing.items[1]
+        foreign.items[1]["workspaceId"] = OTHER_ID
+        del unlisted.databases[1]
+        for eventhouse, message in ((missing, "Expected one KQL database named BookSignals in the current workspace"),
+                                    (foreign, "Refusing to use a KQL database outside the current workspace"),
+                                    (unlisted, "Expected one Kusto database for the BookSignals KQL database")):
+            lake = Lake()
+            seed(lake)
+            eventhouse.add("reprint_requests", approved_request())
+            start = len(lake.log)
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    compute(lake, eventhouse=eventhouse)
+                self.assertEqual(lake.log[start:], [])
+                self.assertEqual(kusto_calls(eventhouse), [])
+
+    def test_a_failed_append_leaves_its_run_without_a_signal_runs_row(self):
+        eventhouse, lake = Eventhouse(), Lake()
+        seed(lake)
+        compute(lake, eventhouse=eventhouse)
+        complete = eventhouse.rows("signal_runs")
+        eventhouse.failures[".append decision_options"] = [400]
+        with self.assertRaisesRegex(RuntimeError, r"Kusto \.append decision_options failed \(400\)"):
+            compute(lake, eventhouse=eventhouse)
+        self.assertEqual(eventhouse.rows("signal_runs"), complete, "the latest complete run is still the first")
+        incomplete = {row["run_id"] for row in eventhouse.rows("title_signals")} - {complete[0]["run_id"]}
+        self.assertEqual(len(incomplete), 1, "the failed run's title signals stay, without the row that completes it")
+        self.assertNotIn(incomplete.pop(), {row["run_id"] for row in eventhouse.rows("decision_options")})
+
+    def test_throttling_and_service_errors_are_retried_a_bounded_number_of_times(self):
+        lake = Lake()
+        seed(lake)
+        eventhouse = Eventhouse()
+        eventhouse.failures[".show databases"] = [429, 503]
+        namespace, _ = compute(lake, eventhouse=eventhouse)
+        self.assertEqual([csl for _, _, csl in eventhouse.calls].count(".show databases"), 3)
+        eventhouse = Eventhouse()
+        eventhouse.failures[".show databases"] = [503] * namespace["ATTEMPTS"]
+        with self.assertRaisesRegex(RuntimeError, r"Kusto \.show databases failed \(503\)"):
+            compute(lake, eventhouse=eventhouse)
+        self.assertEqual([csl for _, _, csl in eventhouse.calls].count(".show databases"), namespace["ATTEMPTS"])
+
+    def test_a_retried_append_that_had_landed_counts_once(self):
+        # The first append lands but its response is lost; the retry's duplicate tag fails, and the rows read back.
+        eventhouse, lake = Eventhouse(), Lake()
+        seed(lake)
+        append = eventhouse.append
+
+        def lost(csl):
+            append(csl)
+            del eventhouse.append
+            return failure(503, "The response was lost.")
+
+        eventhouse.append = lost
+        compute(lake, eventhouse=eventhouse)
+        run_id = eventhouse.rows("signal_runs")[0]["run_id"]
+        self.assertEqual(sum(row["run_id"] == run_id for row in eventhouse.rows("title_signals")), 10)
+        self.assertEqual([csl.split(" ", 2)[1] for csl in kusto_calls(eventhouse) if csl.startswith(".append")],
+                         ["title_signals", "title_signals", "decision_options", "signal_runs"])
+
+    def test_the_kql_tables_hold_the_lakehouse_columns(self):
+        lake = Lake()
+        seeded = {name: schema for name, schema, _ in seed(lake)["TABLES"]}
+        namespace, _ = compute(lake)
+        derived, tables = dict(namespace["DERIVED"]), kql_tables()
+        self.assertEqual(sorted(tables), ["decision_options", "reprint_requests", "signal_runs", "title_signals"])
+        run_columns = [("run_id", "string"), ("computed_at", "datetime")]
+        for name in ("title_signals", "decision_options"):
+            self.assertEqual(tables[name], kql_columns(derived[name]) + run_columns, name)
+        self.assertEqual(tables["signal_runs"], [("run_id", "string"), ("as_of_week", "datetime"),
+                                                 ("computed_at", "datetime"), ("title_signals", "long"),
+                                                 ("decision_options", "long")])
+        self.assertEqual(namespace["REQUESTS"], seeded["reprint_requests"], "the copy writes SeedBooks' columns")
+        held = dict(tables["reprint_requests"])
+        self.assertEqual([(name, held.get(name)) for name, _ in kql_columns(seeded["reprint_requests"])],
+                         kql_columns(seeded["reprint_requests"]))
+
+
+class PlanTests(unittest.TestCase):
+    def test_the_plan_deploys_book_signals_before_computing_the_signals_into_it(self):
+        groups = plan_groups()
+        items = {data["metadata"]["displayName"]: data for data in (
+            json.loads(path.read_text(encoding="utf-8")) for path in WORKSPACE.glob("*/.platform"))}
+        for name, group in groups.items():
+            self.assertEqual(group["logical_id"], items[name]["config"]["logicalId"], name)
+            self.assertLessEqual(set(group["depends_on"]), set(groups), name)
+            self.assertLessEqual(set(group["runs"]), {group["logical_id"]}, name)
+        self.assertEqual((items["BookEvents"]["metadata"]["type"], items["BookSignals"]["metadata"]["type"]),
+                         ("Eventhouse", "KQLDatabase"))
+        properties = json.loads((WORKSPACE / "BookSignals.KQLDatabase" / "DatabaseProperties.json").read_text(
+            encoding="utf-8"))
+        self.assertEqual(properties["parentEventhouseItemId"], items["BookEvents"]["config"]["logicalId"])
+        self.assertEqual(groups["BookSignals"]["depends_on"], ["BookEvents"])
+        self.assertIn("BookSignals", groups["ComputeBookSignals"]["depends_on"])
+        defaults = run("ComputeBookSignals", modules(Lake()), count=1)[0]
+        self.assertEqual(groups["ComputeBookSignals"]["parameters"],
+                         {name: defaults[name] for name in ("lakehouse_name", "kql_database_name")})
+        self.assertEqual(defaults["kql_database_name"], "BookSignals")
 
 
 if __name__ == "__main__":

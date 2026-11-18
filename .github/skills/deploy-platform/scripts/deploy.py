@@ -63,15 +63,15 @@ import foundry_agent as foundry  # noqa: E402
 import preflight_runtime as runtime  # noqa: E402
 
 PHASES = ("signin", "config", "preflight", "identity", "consent", "platform",
-          "bootstrap", "knowledge", "verify", "agent", "app")
+          "bootstrap", "knowledge", "verify", "reprint", "agent", "app")
 OK, USAGE, BLOCKED, WAITING, APPROVAL = 0, 1, 2, 3, 4
-PLAN_PHASES = ("identity", "platform", "knowledge", "app", "destroy")
+PLAN_PHASES = ("identity", "platform", "knowledge", "reprint", "app", "destroy")
 # Never granted by --yes: deletions, and replacing live Fabric definitions.
 DESTRUCTIVE_APPROVALS = ("destroy", "purge-foundry", "item-update", "shared-action-group")
 # Approved by the sha256 prefix of exactly what they change.
 DIGEST_APPROVALS = PLAN_PHASES + ("item-update",)
-APPROVAL_KEYS = DIGEST_APPROVALS + ("knowledge-registration", "agent-publish", "app-build", "purge-foundry",
-                                    "shared-action-group")
+APPROVAL_KEYS = DIGEST_APPROVALS + ("knowledge-registration", "agent-publish", "app-build", "reprint-build",
+                                    "reprint-roles", "purge-foundry", "shared-action-group")
 # A transient failure (a connection reset, EOF or timeout, HTTP 429 or 5xx) of a read is retried: at most this many
 # attempts in all, after Retry-After or an exponential backoff from RETRY_BACKOFF seconds.
 RETRY_ATTEMPTS = 3
@@ -174,7 +174,8 @@ class Scenario(NamedTuple):
 SCENARIO = Scenario(
     items=(("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
            ("signals", "Notebook", "ComputeBookSignals"), ("ontology", "Ontology", "BooksOntology"),
-           ("bind", "Notebook", "BindBooks"), ("knowledge", "Notebook", "PublishBooksKnowledge")),
+           ("bind", "Notebook", "BindBooks"), ("knowledge", "Notebook", "PublishBooksKnowledge"),
+           ("eventhouse", "Eventhouse", "BookEvents"), ("kql", "KQLDatabase", "BookSignals")),
     plan="Bootstrap",
     registration="scenario",
     registration_description=("Current book performance: titles, editions, campaigns, the latest week's signals and "
@@ -183,7 +184,7 @@ SCENARIO = Scenario(
             "reprint_requests"),
     expression="BooksLakehouse",
     runs=(NotebookRun("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
-          NotebookRun("signals", {"lakehouse_name": "Books"}, True, ("seed",)),
+          NotebookRun("signals", {"lakehouse_name": "Books", "kql_database_name": "BookSignals"}, True, ("seed",)),
           NotebookRun("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
           NotebookRun("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True,
                       binding_chain=False)),
@@ -235,9 +236,13 @@ APP_NEXT = (
     "Open the app URL above in a browser and sign in. At first sign-in, consent to the app's access to Microsoft "
     "Foundry for you, unless an administrator granted it for everyone (terraform output app: api_permissions_url).",
     "Ask with IQ. When a tool first needs your permission, the app shows a consent card that links to Microsoft's "
-    "consent page: accept, then ask again. Fabric IQ, and Work IQ when work_iq_enabled, each ask once per user; "
-    "Foundry IQ and Web IQ use the project's identity and never ask.",
+    "consent page: accept, then ask again. Fabric IQ, the reprint request tool and, when work_iq_enabled, Work IQ "
+    "each ask once per user; Foundry IQ and Web IQ use the project's identity and never ask.",
     SCENARIO.app_question,
+    "Ask with IQ to submit a reprint request: the app shows the exact request for you to approve or reject. Rejecting "
+    "submits nothing; approving lets the reprint server record it in the BookSignals KQL database with you as its "
+    "approver, if your approval role allows it, and the next ComputeBookSignals run marks the inventory risk "
+    "Actioned. DEV cannot take an approval back.",
     "Select Ask both to compare the agent with IQ and the agent without IQ side by side.",
     "This run proves the route for your account only: sign in as a second user to see that each user reaches only "
     "the data they may read.",
@@ -1228,6 +1233,8 @@ def token_audiences(ctx):
             audiences.append(("the Fabric deployment scope", {"scope": login_scope}))
     if "verify" in ctx.phases:
         audiences.append(("Azure AI Search", {"resource": SEARCH_RESOURCE}))
+    if "reprint" in ctx.phases:
+        audiences.append(("the KQL database", {"resource": KUSTO_RESOURCE}))
     if "agent" in ctx.phases:
         audiences.append(("Microsoft Foundry", {"scope": FOUNDRY_SCOPE}))
     return audiences
@@ -2999,19 +3006,22 @@ def agent_values(values):
     settings = values.get("agent_settings") or {}
     tools = values.get("foundry_tool_connections") or {}
     fabric = (values.get("fabric_iq_connections") or {}).get(SCENARIO.registration) or {}
-    knowledge, public, mail = ((tools.get(key) or {}) for key in ("knowledge_base", "public_context", "work_iq_mail"))
+    knowledge, public, mail, reprint = ((tools.get(key) or {}) for key in (
+        "knowledge_base", "public_context", "work_iq_mail", "reprint_request"))
     entries = {
         "agent_model_deployment": settings.get("model_deployment"),
         "knowledge_base_mcp_endpoint": knowledge.get("server_url"), "knowledge_base_connection": knowledge.get("name"),
         "public_context_mcp_endpoint": public.get("server_url"), "public_context_connection": public.get("name"),
         "fabric_iq_mcp_endpoint": fabric.get("server_url"), "fabric_iq_connection": fabric.get("name"),
+        "reprint_request_mcp_endpoint": reprint.get("server_url"), "reprint_request_connection": reprint.get("name"),
     }
     if work_iq_enabled(values):
         entries.update(work_iq_mail_mcp_endpoint=mail.get("server_url"), work_iq_mail_connection=mail.get("name"))
     missing = sorted(name for name, value in entries.items() if not value)
     if missing:
         raise Blocked("Agent settings are missing from Terraform outputs: " + ", ".join(missing) + ".",
-                      "Complete the knowledge phase first: the agents' tools need its knowledge bases and connections.")
+                      "Complete the knowledge and reprint phases first: the agents' tools need their knowledge bases, "
+                      "connections and the reprint request server.")
     entries["agent_reasoning_effort"] = settings.get("reasoning_effort")
     return entries
 
@@ -3115,14 +3125,17 @@ def phase_agent(ctx):
             + ("" if work_iq else "; Work IQ is off, so the with-IQ agent has no mail tool"))
 
 
-def app_tag(ctx):
-    """The content digest of the image's inputs at HEAD, after refusing uncommitted or untracked changes to them."""
-    require_committed(ctx, APP_BUILD_PATHS, "the app's build inputs", "the image is built only from committed files")
-    listing = checked(ctx, ["git", "ls-tree", "-r", "HEAD", "--", *APP_BUILD_PATHS], "Listing the app's build inputs",
-                      quiet=True)
+def content_tag(ctx, paths, inputs):
+    """The content digest of an image's inputs at HEAD, after refusing uncommitted or untracked changes to them."""
+    require_committed(ctx, paths, inputs, "the image is built only from committed files")
+    listing = checked(ctx, ["git", "ls-tree", "-r", "HEAD", "--", *paths], f"Listing {inputs}", quiet=True)
     if not listing.stdout.strip():
-        raise Blocked("HEAD holds none of the app's build inputs.")
+        raise Blocked(f"HEAD holds none of {inputs}.")
     return hashlib.sha256(listing.stdout.encode()).hexdigest()[:12]
+
+
+def app_tag(ctx):
+    return content_tag(ctx, APP_BUILD_PATHS, "the app's build inputs")
 
 
 def image_built(ctx, registry, repository, tag):
@@ -3139,27 +3152,38 @@ def image_built(ctx, registry, repository, tag):
         raise Blocked("az acr repository show-tags did not return JSON.") from None
 
 
-APP_IMAGE_TAG_LINE = re.compile(r'(?m)^app_image_tag[ \t]*=[ \t]*(null|"[0-9a-f]{12}")[ \t]*(?:#[^\r\n]*)?\r?$')
+# The tfvars variables that hold the tag of an image the runner built, null until it is built.
+IMAGE_TAG_VARIABLES = ("app_image_tag", "reprint_image_tag")
 
 
-def app_image_tag_line(ctx):
-    """The one top-level app_image_tag line of infra/terraform.tfvars, and the file's bytes."""
+def image_tag_line(ctx, name):
+    """The one top-level `name` line of infra/terraform.tfvars, and the file's bytes."""
+    if name not in IMAGE_TAG_VARIABLES:
+        raise Blocked(f"{name} is not an image tag variable.")
     path = ctx.infra / "terraform.tfvars"
     if path.is_symlink():
         raise Blocked("Refusing to update a symlinked infra/terraform.tfvars.")
     original = path.read_bytes()
     text = original.decode("utf-8")
-    match = APP_IMAGE_TAG_LINE.search(text)
-    if len(re.findall(r"(?m)^app_image_tag[ \t]*=", text)) != 1 or not match:
-        raise Blocked("infra/terraform.tfvars needs exactly one top-level app_image_tag line, null or a 12-character tag.",
-                      "Add `app_image_tag = null` as in infra/terraform.tfvars.example, then rerun deploy.py up.")
+    match = re.search(rf'(?m)^{name}[ \t]*=[ \t]*(null|"[0-9a-f]{{12}}")[ \t]*(?:#[^\r\n]*)?\r?$', text)
+    if len(re.findall(rf"(?m)^{name}[ \t]*=", text)) != 1 or not match:
+        raise Blocked(f"infra/terraform.tfvars needs exactly one top-level {name} line, null or a 12-character tag.",
+                      f"Add `{name} = null` as in infra/terraform.tfvars.example, then rerun deploy.py up.")
     return match, original
 
 
+def app_image_tag_line(ctx):
+    return image_tag_line(ctx, "app_image_tag")
+
+
 def set_app_image_tag(ctx, tag):
-    """Write the built tag into infra/terraform.tfvars, replacing only its one app_image_tag value."""
+    return set_image_tag(ctx, "app_image_tag", tag)
+
+
+def set_image_tag(ctx, name, tag):
+    """Write the built tag into infra/terraform.tfvars, replacing only its one `name` value."""
     path = ctx.infra / "terraform.tfvars"
-    match, original = app_image_tag_line(ctx)
+    match, original = image_tag_line(ctx, name)
     text = original.decode("utf-8")
     value = json.dumps(tag)
     if match.group(1) == value:
@@ -3195,6 +3219,32 @@ def wait_healthy(ctx, origin):
                   "Azure portal if it doesn't. Then rerun deploy.py up.")
 
 
+def build_image(ctx, registry, repository, tag, context, approval, receipts):
+    """Build repository:tag once, with ACR Tasks, from this checkout's committed context/ and its Dockerfile."""
+    if image_built(ctx, registry, repository, tag):
+        return
+    approve(ctx, approval, f"Build image {repository}:{tag} from this checkout's committed {context}/ in "
+                           f"registry {registry} with ACR Tasks")
+    receipts["build"] = {"tag": tag, "started_at": utc_now()}
+    ctx.state.save()
+    # For a local context, az acr build reads --file from the working directory, the repository root, and uploads
+    # it beside the context, which its .dockerignore filters.
+    result = run(ctx, ["az", "acr", "build", "--registry", registry, "--image", f"{repository}:{tag}",
+                       "--file", f"{context}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
+                       context], stream=True)
+    if result.code:
+        raise Blocked(f"az acr build failed (exit {result.code}).\n{tail(result.stdout)}",
+                      "Fix the build, commit, then rerun deploy.py up. A registry's rate limit on a base image "
+                      "(toomanyrequests) passes: rerun later.",
+                      "Where ACR Tasks is unavailable, build and "
+                      f"push {repository}:{tag} with Docker (az acr login --name {registry}): the runner then finds it.",
+                      detail=result.stdout)
+    if not image_built(ctx, registry, repository, tag):
+        raise Blocked(f"ACR Tasks finished, but {repository}:{tag} is not in registry {registry}.")
+    receipts["build"]["completed_at"] = utc_now()
+    ctx.state.save()
+
+
 def phase_app(ctx):
     registry, = required_outputs(ctx, "container_registry")
     name, repository = registry.get("name"), registry.get("repository")
@@ -3206,27 +3256,7 @@ def phase_app(ctx):
     tag = app_tag(ctx)
     app_image_tag_line(ctx)
     receipts = ctx.state.section("app")
-    if not image_built(ctx, name, repository, tag):
-        approve(ctx, "app-build", f"Build image {repository}:{tag} from this checkout's committed {APP_CONTEXT}/ in "
-                                  f"registry {name} with ACR Tasks")
-        receipts["build"] = {"tag": tag, "started_at": utc_now()}
-        ctx.state.save()
-        # For a local context, az acr build reads --file from the working directory, the repository root, and uploads
-        # it beside the context, which its .dockerignore filters.
-        result = run(ctx, ["az", "acr", "build", "--registry", name, "--image", f"{repository}:{tag}",
-                           "--file", f"{APP_CONTEXT}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
-                           APP_CONTEXT], stream=True)
-        if result.code:
-            raise Blocked(f"az acr build failed (exit {result.code}).\n{tail(result.stdout)}",
-                          "Fix the build, commit, then rerun deploy.py up. A registry's rate limit on a base image "
-                          "(toomanyrequests) passes: rerun later.",
-                          "Where ACR Tasks is unavailable, build and "
-                          f"push {repository}:{tag} with Docker (az acr login --name {name}): the runner then finds it.",
-                          detail=result.stdout)
-        if not image_built(ctx, name, repository, tag):
-            raise Blocked(f"ACR Tasks finished, but {repository}:{tag} is not in registry {name}.")
-        receipts["build"]["completed_at"] = utc_now()
-        ctx.state.save()
+    build_image(ctx, name, repository, tag, APP_CONTEXT, "app-build", receipts)
 
     def record_tag():
         # Only after the plan's approval: an earlier phase's full plan must not deploy an unapproved image.
@@ -3249,6 +3279,189 @@ def phase_app(ctx):
     return (f"{result}; {origin} runs {repository}:{tag} and answers its health check with this deployment's sign-in "
             f"registration; {consent}. Open it and sign in: not proof of consent to the agents' tools or of an answer "
             "(next steps)")
+
+
+# The approval-gated reprint request server, built from its committed directory like the app.
+REPRINT_CONTEXT = "scenario/workflows/reprint-request"
+REPRINT_BUILD_PATHS = (REPRINT_CONTEXT,)
+# Microsoft Graph: the reprint-request connection also asks for offline_access, so Foundry can renew each user's token.
+GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+# The server identity's only KQL database roles, as .add names them and as .show reports them: it reads the governed
+# rows and its own requests, and appends requests.
+REPRINT_ROLES = {"viewers": "Viewer", "ingestors": "Ingestor"}
+# Kusto's documented token audience, when an endpoint's sign-in metadata names none.
+KUSTO_RESOURCE = "https://kusto.kusto.windows.net"
+KUSTO_ORIGIN = re.compile(r"https://[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\.kusto\.fabric\.microsoft\.com")
+# A Kusto database name the runner embeds in a command: a GUID or a plain display name, never a quote or bracket.
+KUSTO_DATABASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,259}")
+REPRINT_READY_ATTEMPTS = 18
+
+
+def kusto_resource(ctx, origin):
+    """The audience of a Kusto endpoint's tokens, as its own sign-in metadata names it."""
+    cached = ctx.cache.setdefault("kusto_resources", {})
+    if origin not in cached:
+        response = ctx.http.request("GET", f"{origin}/v1/rest/auth/metadata", timeout=30)
+        # Like Kusto's SDKs, an endpoint without sign-in metadata takes the documented audience.
+        if response.status not in (200, 404):
+            raise ServiceError("Reading the KQL endpoint's sign-in metadata", response)
+        metadata = response.json(default={}) if response.status == 200 else {}
+        resource = str(((metadata or {}).get("AzureAD") or {}).get("KustoServiceResourceId")
+                       or KUSTO_RESOURCE).rstrip("/")
+        if not re.fullmatch(r"https://[a-z0-9.-]+", resource):
+            raise Blocked("The KQL endpoint names an unexpected token audience.")
+        cached[origin] = resource
+    return cached[origin]
+
+
+def kusto(ctx, origin, command, label, database=None):
+    """One KQL management command as the deployer: the rows of its first result table, as dicts."""
+    token = access_token(ctx, resource=kusto_resource(ctx, origin))
+    if not token:
+        raise Waiting("Azure CLI could not get a KQL token for you.",
+                      "Sign in again with az login as the deploying user, then rerun deploy.py up.")
+    body = {"csl": command, **({"db": database} if database else {})}
+    response = ctx.http.request("POST", f"{origin}/v1/rest/mgmt", headers={"Authorization": f"Bearer {token}"},
+                                body=body, timeout=60)
+    if response.status != 200:
+        raise ServiceError(label, response)
+    tables = (response.json(default={}) or {}).get("Tables")
+    if not isinstance(tables, list) or not tables or not isinstance(tables[0], dict):
+        raise Blocked(f"{label} returned no result table.")
+    columns = [column.get("ColumnName") for column in tables[0].get("Columns") or [] if isinstance(column, dict)]
+    return [dict(zip(columns, row)) for row in tables[0].get("Rows") or [] if isinstance(row, list)]
+
+
+def reprint_database(ctx, workspace, item):
+    """The DEV KQL database the reprint server records requests in: its query URI and Kusto database name."""
+    found = fabric_json(ctx, "GET", f"/v1/workspaces/{workspace}/kqlDatabases/{item}", label="Reading the KQL database")
+    origin = str((found.get("properties") or {}).get("queryServiceUri") or "").rstrip("/")
+    if not same_guid(found.get("workspaceId"), workspace) or not KUSTO_ORIGIN.fullmatch(origin):
+        raise Blocked("The KQL database is outside DEV or has no Fabric query URI.")
+    display = scenario_name("kql")
+    # Fabric names a database by its item ID or its display name; Kusto accepts either, and .show reports both.
+    names = {row.get("DatabaseName") for row in kusto(ctx, origin, ".show databases", "Listing the eventhouse's databases")
+             if display in (row.get("DatabaseName"), row.get("PrettyName")) or same_guid(row.get("DatabaseName"), item)}
+    if len(names) != 1 or not KUSTO_DATABASE.fullmatch(str(next(iter(names)) or "")):
+        raise Blocked(f"The eventhouse does not list exactly one {display} database you can manage.")
+    return {"origin": origin, "name": next(iter(names)), "item": item}
+
+
+def ensure_reprint_roles(ctx, database, identity):
+    """Grant the server's identity Database Viewer and Ingestor on the KQL database as the deployer, once."""
+    principal = f"aadapp={guid(identity, 'reprint server identity')};{guid(ctx.target('tenant_id'), 'tenant')}"
+    name = database["name"]
+    commands = [f".add database ['{name}'] {command} ('{principal}') 'reprint request server'" for command in REPRINT_ROLES]
+
+    def command(csl, label):
+        try:
+            return kusto(ctx, database["origin"], csl, label, name)
+        except ServiceError as error:
+            if error.status not in (401, 403):
+                raise
+            raise MissingPermission(
+                f"{error.message} You can't manage the {scenario_name('kql')} KQL database's principals.",
+                f"After the grant, rerun deploy.py {ctx.args.command}; completed work is not repeated.",
+                grants=[f"A DEV workspace Admin or Member, or an admin of the {scenario_name('kql')} KQL database, "
+                        "either makes you a workspace Contributor or higher, or runs in that database: "
+                        + " and ".join(commands)]) from None
+
+    def held():
+        rows = command(f".show database ['{name}'] principals", "Reading the KQL database's principals")
+        # A role reads like "Database BookSignals Viewer"; the identity's FQN is aadapp=<client ID>;<tenant>.
+        return {str(row.get("Role") or "").split()[-1] for row in rows if str(row.get("Role") or "").split()
+                and str(row.get("PrincipalFQN") or "").lower().startswith(f"aadapp={identity.lower()}")}
+
+    missing = [role for role, shown in REPRINT_ROLES.items() if shown not in held()]
+    if missing:
+        approve(ctx, "reprint-roles", f"Grant the reprint server's identity ({identity}) "
+                                      + " and ".join(f"Database {REPRINT_ROLES[role]}" for role in missing)
+                                      + f" on KQL database {scenario_name('kql')} in DEV, as you")
+        for role in missing:
+            command(f".add database ['{name}'] {role} ('{principal}') 'reprint request server'",
+                    f"Granting the reprint server's identity Database {REPRINT_ROLES[role]}")
+        if any(role not in held() for role in REPRINT_ROLES.values()):
+            raise Blocked("The KQL database does not list the reprint server's roles after granting them.")
+        ctx.state.section("reprint")["roles"] = {"database": name, "identity": identity, "granted_at": utc_now()}
+        ctx.state.save()
+    return "granted now" if missing else "already held"
+
+
+def reprint_registration(ctx):
+    """The reprint_request output: the server's endpoint, registrations and identity."""
+    registration, = required_outputs(ctx, "reprint_request")
+    if not same_guid(registration.get("tenant_id"), ctx.target("tenant_id")):
+        raise Blocked("The reprint server's registrations are in another tenant than the signed-in deployment tenant.")
+    for key in ("mcp_endpoint", "connection_name", "oauth_redirect_url", "api_client_id", "client_id",
+                "service_principal_object_id", "identity_client_id", "repository"):
+        if not registration.get(key):
+            raise Blocked(f"The reprint_request output has no {key}.", "Rerun deploy.py up so the platform plan creates "
+                          "the reprint server's registrations, identity and connection.")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._/-]{0,127}", registration["repository"]):
+        raise Blocked("The reprint_request output names an invalid image repository.")
+    return registration
+
+
+def wait_reprint_ready(ctx, origin):
+    """Wait until the server answers and, as its own identity, sees both its KQL roles."""
+    wait_healthy(ctx, origin)
+    for attempt in range(REPRINT_READY_ATTEMPTS):
+        if attempt:
+            ctx.sleep(10)
+        try:
+            response = ctx.http.request("GET", f"{origin}/readyz", timeout=30, attempts=1)
+        except TransportError:
+            continue
+        body = response.json(default={}) or {}
+        roles = body.get("roles") if isinstance(body, dict) else None
+        if (response.status == 200 and body.get("ready") is True and isinstance(roles, list)
+                and set(REPRINT_ROLES.values()) <= set(roles)):
+            return sorted(roles)
+    raise Waiting(f"{origin} does not see its KQL database roles yet.",
+                  "A new KQL role can take a few minutes to apply. Rerun deploy.py up; if it persists, inspect the "
+                  "container app's logs.")
+
+
+def phase_reprint(ctx):
+    registry, = required_outputs(ctx, "container_registry")
+    name = registry.get("name")
+    if not (isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9]{5,50}", name)):
+        raise Blocked("The container_registry output is incomplete.")
+    registration = reprint_registration(ctx)
+    repository = registration["repository"]
+    tag = content_tag(ctx, REPRINT_BUILD_PATHS, "the reprint server's build inputs")
+    image_tag_line(ctx, "reprint_image_tag")
+    workspace = guid(required_outputs(ctx, "dev_workspace_id")[0], "dev_workspace_id")
+    database = reprint_database(ctx, workspace, resolve_items(ctx, workspace)["kql"])
+    roles = ensure_reprint_roles(ctx, database, registration["identity_client_id"])
+    receipts = ctx.state.section("reprint")
+    build_image(ctx, name, repository, tag, REPRINT_CONTEXT, "reprint-build", receipts)
+
+    def record_tag():
+        # Only after the plan's approval: an earlier phase's full plan must not deploy an unapproved image.
+        if set_image_tag(ctx, "reprint_image_tag", tag):
+            ctx.log(f'Set reprint_image_tag = "{tag}" in infra/terraform.tfvars.')
+            ctx.forget()
+
+    result = converge(ctx, "reprint", variables={"reprint_image_tag": tag}, before_apply=record_tag)
+    current = reprint_registration(ctx)
+    if current.get("image_tag") != tag or not current.get("url"):
+        raise Blocked("The reprint_request output does not run the built image yet; review the reprint plan.")
+    origin = https_origin(current["url"], "reprint_request.url")
+    if current["mcp_endpoint"] != f"{origin}/mcp":
+        raise Blocked("The reprint server's URL differs from the endpoint its connection names.")
+    seen = wait_reprint_ready(ctx, origin)
+    # Each user still signs in once through Foundry's link; the tenant-wide grant spares them Entra's consent screen.
+    ensure_consent(ctx, current, current["api_client_id"], "the reprint server's ReprintRequest.Submit")
+    ensure_consent(ctx, {**current, "delegated_scopes": ["offline_access"]}, GRAPH_APP_ID,
+                   "Microsoft Graph's offline_access for the reprint-request connection")
+    receipts.update(url=origin, image_tag=tag, database=database["name"], verified_at=utc_now())
+    ctx.state.save()
+    return (f"{result}; {origin} runs {repository}:{tag}, and its identity sees {' and '.join(seen)} on KQL database "
+            f"{scenario_name('kql')} ({roles}); the {current['connection_name']} connection's client is granted "
+            "ReprintRequest.Submit and offline_access tenant-wide, and Terraform gives you the Publishing director "
+            "approval role. Not proof of a write: each user signs in once for the reprint tool, and only an approved "
+            "request in the app records one")
 
 
 def teardown_snapshot(ctx):
@@ -3382,9 +3595,9 @@ def teardown_next(snapshot):
         steps.append(f"Fabric tenant admin: permanently delete retained workspaces in OneLake catalog > Govern > "
                      f"Workspaces ({workspaces}). Retention is not immediate data erasure.")
     steps.append("Microsoft Entra keeps the deleted app registrations (the Fabric user-auth one, the app's sign-in "
-                 "registration and, with Work IQ, Work IQ's) under Deleted applications for 30 days; restore or "
-                 "permanently delete them there. Tenant-wide and users' consents are removed with their service "
-                 "principals.")
+                 "registration, the reprint server's API and OAuth client and, with Work IQ, Work IQ's) under Deleted "
+                 "applications for 30 days; restore or permanently delete them there. Tenant-wide and users' consents "
+                 "and approval roles are removed with their service principals.")
     if snapshot.get("agents"):
         steps.append("The Foundry agents (" + ", ".join(snapshot["agents"]) + ") and their stored runs were deleted with "
                      "the Foundry project, and the purge removed the account.")
@@ -3529,7 +3742,8 @@ def as_missing_permission(ctx, phase, stop):
 PHASE_FUNCTIONS = {
     "signin": phase_signin, "config": phase_config, "preflight": phase_preflight, "identity": phase_identity,
     "consent": phase_consent, "platform": phase_platform, "bootstrap": phase_bootstrap,
-    "knowledge": phase_knowledge, "verify": phase_verify, "agent": phase_agent, "app": phase_app,
+    "knowledge": phase_knowledge, "verify": phase_verify, "reprint": phase_reprint, "agent": phase_agent,
+    "app": phase_app,
     "destroy": phase_destroy,
 }
 

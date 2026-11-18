@@ -51,12 +51,15 @@ export function createAgentClient(): AgentClient {
   }
   const send: Send = async (question, cid, signal, onTool) => {
     const { accessToken } = await import('./auth.ts')
-    const request: TurnRequest = {
-      cid,
-      variant: question.variant,
-      question: question.text,
-      ...(question.previousResponseId ? { previousResponseId: question.previousResponseId } : {}),
-    }
+    // A decision names only the approval request and the answer; Foundry keeps the arguments it holds.
+    const request: TurnRequest = question.approval
+      ? { cid, variant: question.variant, approval: question.approval, previousResponseId: question.previousResponseId }
+      : {
+          cid,
+          variant: question.variant,
+          question: question.text,
+          ...(question.previousResponseId ? { previousResponseId: question.previousResponseId } : {}),
+        }
     const response = await fetch(TURN_PATH, {
       method: 'POST',
       headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },

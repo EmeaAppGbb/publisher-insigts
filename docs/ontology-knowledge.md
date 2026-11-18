@@ -27,14 +27,14 @@ Registering the Search source doesn't remove its end-user token requirement.
 | --- | --- |
 | `Title`, `Edition` (`EditionOf` -> Title), `Campaign` (`Promotes` -> Title) | `Books.dbo.titles`, `editions` and `campaigns`, seeded by `SeedBooks` |
 | `TitleSignal` (`SignalFor` -> Title), `DecisionOption` (`OptionFor` -> TitleSignal), `TitlePerformance` (`PerformanceOf` -> Title) | `Books.dbo.title_signals`, `decision_options` and `title_performance`, derived by `ComputeBookSignals` |
-| `ReprintRequest` (`ReprintOf` -> Edition) | `Books.dbo.reprint_requests`, empty until a reprint request is approved |
+| `ReprintRequest` (`ReprintOf` -> Edition) | `Books.dbo.reprint_requests`, empty until `ComputeBookSignals` copies a request approved in the app from the `BookSignals` KQL database |
 
 The [data contract](../scenario/data/README.md) defines every table, key and rule. [`BooksOntology.Ontology`](../workspace/BooksOntology.Ontology) uses the [new-experience TMDL definition](https://learn.microsoft.com/rest/api/fabric/articles/item-management/definitions/ontology-definition), with stable logical and lineage IDs. The initial backing tables deliberately have **no partitions**: they define the shape without embedding someone else's workspace/SQL endpoint. The ontology is not data-query-ready until binding completes.
 
 The [`Bootstrap` plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) runs this sequence:
 
 1. Deploy `Books`, then deploy and execute `SeedBooks` to insert missing fictional rows and `Files/documents/starter.txt`, in the folder the default `documents` folder source indexes. `PublishBooksKnowledge`, which depends only on `Books`, writes the [approved documents](../scenario/knowledge/README.md) there too.
-2. Deploy and execute `ComputeBookSignals`, which replaces the three derived tables with the latest week's signals, decision options and title performance.
+2. Deploy the `BookEvents` Eventhouse and its `BookSignals` KQL database, then deploy and execute `ComputeBookSignals`. It copies the reprint requests recorded in `BookSignals` into `dbo.reprint_requests`, insert-only by `request_id`, so an approved request marks its inventory risk *Actioned*; replaces the three derived tables with the latest week's signals, decision options and title performance; and appends that run to `BookSignals`, where the reprint request server reads it ([data contract](../scenario/data/README.md#booksignals-kql-database)).
 3. Deploy `BooksOntology` with its entities, properties and relationships.
 4. Deploy and execute `BindBooks`. It resolves both items in the **current workspace**, waits for the lakehouse's SQL analytics endpoint, refreshes SQL metadata for only the seven ontology tables, and checks every per-table result.
 5. The binder adds one Direct Lake partition per table and the `BooksLakehouse` expression, which reads the lakehouse's SQL analytics endpoint, and pins every partition's `ONT_*` annotations. It then reads the definition back, checks its partitions, expression and pins, and prints the lakehouse/ontology GUIDs.

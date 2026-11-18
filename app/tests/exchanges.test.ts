@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { followUpFrom, newTurn, reduce, type Exchange } from '../src/exchanges.ts'
+import { decisionOn, decisionTurn, followUpFrom, newTurn, pendingApproval, questionOf, reduce, type Exchange } from '../src/exchanges.ts'
 import type { ToolCall, TurnResult } from '../src/live/types.ts'
 import { parseReply } from '../src/live/reply.ts'
 
@@ -51,4 +51,26 @@ test('asking again restarts the same turn with its question and previous respons
   state = reduce(state, { type: 'restart', turnId: 't3', startedAt: 9 })
   assert.deepEqual(state[0].threads[0].turns[1], { id: 't3', question: 'Since when?', startedAt: 9, running: true, toolCalls: [], previousResponseId: 'resp_1' })
   assert.equal(reduce(state, { type: 'ask', exchange: { id: 'e2', question: 'q', threads: [] } })[0].id, 'e2', 'the newest question comes first')
+})
+
+test('a held call waits for one decision, which continues its response as the thread’s next turn', () => {
+  const approval = { id: 'mcpr_1', server: 'reprint_request', tool: 'submit_reprint_request', arguments: { territory: 'UK' } }
+  const held: TurnResult = { status: 'needs-approval', approval, elapsedMs: 900, responseId: 'resp_1', toolCalls: [done] }
+  let state = reduce(asked(), { type: 'finish', turnId: 't1', result: held })
+  state = reduce(state, { type: 'finish', turnId: 't2', result: { ...held, approval: { ...approval, id: 'mcpr_2' } } })
+  const [withIq, withoutIq] = state[0].threads
+  assert.deepEqual(pendingApproval(withIq), { approval, responseId: 'resp_1' })
+  assert.equal(followUpFrom(withIq), undefined, 'no follow-up question while the call waits')
+  assert.equal(decisionTurn(withoutIq, true, 'x', 0), undefined, 'only the with-IQ agent holds calls for approval')
+  const turn = decisionTurn(withIq, true, 't3', 5)
+  assert.ok(turn)
+  assert.deepEqual(turn, { id: 't3', question: '', startedAt: 5, running: true, toolCalls: [], previousResponseId: 'resp_1', approval: { id: 'mcpr_1', approve: true } })
+  const decision = { variant: 'with_iq', approval: { id: 'mcpr_1', approve: true }, previousResponseId: 'resp_1' }
+  assert.deepEqual(questionOf(withIq, turn), decision)
+  state = reduce(state, { type: 'follow-up', threadId: 'with', turn })
+  const decided = state[0].threads[0]
+  assert.deepEqual([pendingApproval(decided), decisionOn(decided, decided.turns[0]), decisionTurn(decided, false, 't4', 6)], [undefined, true, undefined], 'one decision per request')
+  state = reduce(state, { type: 'finish', turnId: 't3', result: { status: 'failed', message: 'Foundry answered HTTP 503. Ask again.', elapsedMs: 1, toolCalls: [] } })
+  state = reduce(state, { type: 'restart', turnId: 't3', startedAt: 9 })
+  assert.deepEqual(questionOf(state[0].threads[0], state[0].threads[0].turns[1]), decision, 'asking again resends the same decision')
 })

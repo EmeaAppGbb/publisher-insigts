@@ -17,10 +17,17 @@ groups:
               value: Books
             - name: allow_other_workspaces
               value: false
+  - name: BookEvents
+    logicalId: 2be4d554-4185-47ae-9d6d-2d79c49a2992
+  - name: BookSignals
+    logicalId: 042d6a15-62ec-4c64-9989-e12f7fadf253
+    dependsOn:
+      - groupName: BookEvents
   - name: ComputeBookSignals
     logicalId: 0fdeff35-5d26-490a-9280-be08db7f167c
     dependsOn:
       - groupName: SeedBooks
+      - groupName: BookSignals
     postActions:
       - name: Compute the latest week's signals
         job:
@@ -29,6 +36,8 @@ groups:
           parameters:
             - name: lakehouse_name
               value: Books
+            - name: kql_database_name
+              value: BookSignals
   - name: BooksOntology
     logicalId: 0291970c-8a8b-4481-b30b-ed6a309d2368
     dependsOn:

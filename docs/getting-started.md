@@ -13,7 +13,7 @@ preparation checklist](../preparation.md) lists the same items as tasks.
 
 For a visual overview, see the [platform architecture](architecture.md) and [deployment flow](deployment-flow.md). The prepared toolchain includes the [official Microsoft IQ Copilot packages](copilot-tooling.md); their MCP authentication and runtime connections remain separate from image installation.
 
-**Guided App/CLI path:** open the derived repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document and live ontology retrieval and the keyless Web IQ wiring, then publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
+**Guided App/CLI path:** open the derived repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document and live ontology retrieval and the keyless Web IQ wiring, then deploys the reprint request server, publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
 
 **Deterministic path:** the skill drives the same [runner](development.md#deploy-deterministically) that you can run yourself, with the same gates and no AI agent: `python3 .github/skills/deploy-platform/scripts/deploy.py up`. The steps below remain the canonical manual flow and the runner's contract.
 
@@ -21,7 +21,7 @@ For a visual overview, see the [platform architecture](architecture.md) and [dep
 
 Read each row left to right, then continue down. The diagram's ten stages expand
 the seven numbered sections below; [stage details](deployment-flow.md) distinguish
-DEV readiness from the agents and app and later promotion.
+DEV readiness from the reprint request server, the agents and app and later promotion.
 
 ## Prerequisites
 
@@ -30,9 +30,9 @@ longest lead times; they are typical, not guaranteed.
 
 | Need | Who acts | Lead time | Details |
 | --- | --- | --- | --- |
-| Azure subscription | Subscription owner | Days, for a new subscription or role | A paid subscription in the Entra tenant you use for Fabric. **Owner**, or **Contributor** with **Role Based Access Control Administrator** or **User Access Administrator**, and permission to register resource providers and preview features: Terraform registers `Microsoft.App`, `Microsoft.CognitiveServices`, `Microsoft.ContainerRegistry`, `Microsoft.Fabric`, `Microsoft.Insights`, `Microsoft.ManagedIdentity`, `Microsoft.OperationalInsights`, `Microsoft.Search` and `Microsoft.WebIQ`. The subscription allows ACR Tasks, which build the app's image. |
-| Entra permissions | Entra administrator | Hours to days | You can create and configure app registrations, owners, service principals and pre-authorized clients, for example as Application Developer; subscription ownership does **not** grant this. The tenant has the **Microsoft Power BI Service** and **Azure Machine Learning Services** (`18a66f5f-dbdf-4c17-9dd7-1634712a9cbe`, the resource behind Foundry's `https://ai.azure.com` tokens) enterprise applications; Terraform reads them and never owns them. |
-| Administrator consent | An Entra administrator: the runner, as you, when you are one | Minutes as an administrator; otherwise book one | Tenant-wide consent for the deployment registration's declared Fabric scopes ([step 3](#3-bootstrap-the-fabric-user-auth-application)) and, optionally, the app's Foundry sign-in scope; with Work IQ, also `WorkIQAgent.Ask` and `offline_access` ([Work IQ](#work-iq)). A role such as Cloud Application Administrator can grant it. |
+| Azure subscription | Subscription owner | Days, for a new subscription or role | A paid subscription in the Entra tenant you use for Fabric. **Owner**, or **Contributor** with **Role Based Access Control Administrator** or **User Access Administrator**, and permission to register resource providers and preview features: Terraform registers `Microsoft.App`, `Microsoft.CognitiveServices`, `Microsoft.ContainerRegistry`, `Microsoft.Fabric`, `Microsoft.Insights`, `Microsoft.ManagedIdentity`, `Microsoft.OperationalInsights`, `Microsoft.Search` and `Microsoft.WebIQ`. The subscription allows ACR Tasks, which build the app's and the reprint request server's images. |
+| Entra permissions | Entra administrator | Hours to days | You can create and configure app registrations, owners, service principals, app role assignments and pre-authorized clients, for example as Application Developer; subscription ownership does **not** grant this. The tenant has the **Microsoft Power BI Service** and **Azure Machine Learning Services** (`18a66f5f-dbdf-4c17-9dd7-1634712a9cbe`, the resource behind Foundry's `https://ai.azure.com` tokens) enterprise applications; Terraform reads them and never owns them. |
+| Administrator consent | An Entra administrator: the runner, as you, when you are one | Minutes as an administrator; otherwise book one | Tenant-wide consent for the deployment registration's declared Fabric scopes ([step 3](#3-bootstrap-the-fabric-user-auth-application)), the reprint request connection's `ReprintRequest.Submit` and `offline_access` ([reprint request](#reprint-request)) and, optionally, the app's Foundry sign-in scope; with Work IQ, also `WorkIQAgent.Ask` and `offline_access` ([Work IQ](#work-iq)). A role such as Cloud Application Administrator can grant it. |
 | Fabric tenant settings | Fabric administrator | Hours to days | [**Users can create ontology (preview) items**](https://learn.microsoft.com/fabric/iq/ontology/overview-tenant-settings), [**Users can create deployment plan (preview) items**](https://learn.microsoft.com/fabric/cicd/deployment-plan/how-to-create-deployment-plan), external-app OneLake access and service-principal Fabric APIs. The template never changes tenant settings, and the runner does not check them up front. |
 | Fabric permissions | Fabric administrator | Hours | You can create workspaces, connections and deployment pipelines, and you are listed in `fabric_capacity_admins`. Bootstrap needs `Item.ReadWrite.All` and `Item.Execute.All`. |
 | Web IQ | You; your Microsoft representative | Days or more: enablement is a request | The paid subscription is enabled for Web IQ; Azure credits do not pay for it. You accept its terms before deployment, link the resource after the platform step and bind the Foundry project identity to its AppID after knowledge setup ([Web IQ](#web-iq)). |
@@ -40,19 +40,21 @@ longest lead times; they are typical, not guaranteed.
 | Work IQ (optional) | Global administrator; billing administrator; Microsoft 365 administrator | Days: billing and mailboxes | Only with `work_iq_enabled = true`: the tenant's Work IQ service principal, a Copilot Credits spending policy that covers the Work IQ API and every user, a mailbox per user, and consent ([Work IQ](#work-iq)). |
 | Fabric Git synchronization (optional) | You; your GitHub organization owner | Hours, for PAT approval or SSO | Only with `fabric_git_enabled = true`: a fine-grained PAT for the **new repository** with **Contents: Read and write**, plus Git/GitHub tenant settings, workspace Admin and any applicable cross-geography export setting. |
 | Deployment host | You | Minutes | The derived repository's Codespace or dev container ([developer setup](development.md)). |
-| Other app users | An operator | When you share the app | A Foundry role on the project and read access to the DEV ontology and its data, granted per user; with Work IQ, a mailbox and spending-policy coverage ([access model](runtime-integration.md#access-model)). |
+| Other app users | An operator | When you share the app | A Foundry role on the project and read access to the DEV ontology and its data, granted per user; to approve reprint requests, an approval role on the reprint API; with Work IQ, a mailbox and spending-policy coverage ([access model](runtime-integration.md#access-model)). |
 
 The dev container includes every tool. Locally, install Git 2.27+, Bash,
 [Terraform 1.11+ (below 2.0)](https://developer.hashicorp.com/terraform/install),
 [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) 2.60+, GitHub
-CLI, Python 3 and, for the [web app](#7-create-the-agents-and-app), Node.js 24.11+.
-The runner builds the app's image with ACR Tasks, so no local Docker is needed. No
+CLI, Python 3 and, for the [web app](#7-create-the-agents-and-app) and the
+[reprint request server](#reprint-request), Node.js 24.11+.
+The runner builds both images with ACR Tasks, so no local Docker is needed. No
 local Spark, Fabric CLI or fabric-cicd installation is required; notebooks run in
 Fabric.
 
 Terraform creates the Fabric deployment app, the web app's single-page sign-in
-registration and, with Work IQ, a Work IQ registration that is a public client
-without a secret. The [AzureAD provider](https://registry.terraform.io/providers/hashicorp/azuread/latest/docs)
+registration, the reprint request server's API registration and its connection's
+OAuth client, a public client without a secret, and, with Work IQ, a Work IQ
+registration that is a public client without a secret too. The [AzureAD provider](https://registry.terraform.io/providers/hashicorp/azuread/latest/docs)
 uses your existing sign-in, not the app it is creating. Search and Fabric must share
 a tenant: the [OneLake indexer](https://learn.microsoft.com/azure/search/search-how-to-index-onelake-files#grant-permissions)
 reads DEV as the Search managed identity, which Terraform makes **Contributor on
@@ -76,7 +78,7 @@ earlier phases and acts only on what is missing, so rerunning `up` resumes.
 | 7 | [Wire knowledge](#6-complete-knowledge-setup) | `knowledge` | `--approve knowledge=<sha12>` |
 | 8 | [Prove retrieval](#6-complete-knowledge-setup) | `verify` | The [Web IQ](#web-iq) binding and `--web-iq-bound`; with Work IQ, its consent; missing evidence blocks |
 | 9 | Report DEV ready | `verify` | Every check above passed |
-| 10 | [Publish the agents, deploy the app](#7-create-the-agents-and-app) | `agent`, `app` | `agent-publish`; `app-build`; `--approve app=<sha12>` |
+| 10 | [Deploy the reprint request server](#reprint-request), [publish the agents, deploy the app](#7-create-the-agents-and-app) | `reprint`, `agent`, `app` | `reprint-roles`; `reprint-build`; `--approve reprint=<sha12>`; `agent-publish`; `app-build`; `--approve app=<sha12>` |
 
 The runner exits with `0` when done, `1` on a usage error, `2` when blocked, `3`
 when a person must act or a cloud operation is still running, and `4` when it needs
@@ -100,7 +102,7 @@ On GitHub, select **Use this template > Create a new repository**, then open **t
 
 **Manually:** copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` without overwriting an existing file. Edit its **six placeholders**: `project_name`, `location`, `fabric_capacity_admins`, `github_owner`, `github_repository_name`, and `github_branch_name`. Use your new repository's details and a distinct, short project name. The capacity admin is your Fabric identity's user UPN or service-principal **object ID**. The initializer also works [directly without Copilot](development.md#what-gets-templated).
 
-For every path, leave `knowledge_lakehouse_id = null` and `knowledge_ontologies = {}` through identity and platform setup, and keep the example's top-level `app_image_tag = null` line: the app phase writes the image tag there. Start with a normal Azure CLI user sign-in in the chosen tenant. This lets Terraform prepare Entra configuration; the Fabric-scoped sign-in comes **after** registration and consent in step 3. Work from `infra/` for the remaining Terraform commands:
+For every path, leave `knowledge_lakehouse_id = null` and `knowledge_ontologies = {}` through identity and platform setup, and keep the example's top-level `app_image_tag = null` and `reprint_image_tag = null` lines: the app and reprint phases write their image tags there. A tfvars file written before the reprint request needs `reprint_image_tag = null` added; the reprint phase stops with that instruction until it has exactly one such line. Start with a normal Azure CLI user sign-in in the chosen tenant. This lets Terraform prepare Entra configuration; the Fabric-scoped sign-in comes **after** registration and consent in step 3. Work from `infra/` for the remaining Terraform commands:
 
 `location` is the common region and the Foundry, app and resource-group region. Keep that
 default when available. If quota or regional service capacity blocks a service,
@@ -167,6 +169,8 @@ comments. Keep credentials and tenant and subscription IDs out of the file.
 | `agent_model`, `agent_reasoning_effort` | `gpt-5.4-mini`, capacity 100; `low` | You change the agents' model, its capacity or the effort; `null` omits the effort for a model without reasoning |
 | `app` | 1 vCPU, `2Gi`, one to three replicas | Between sessions, `app = { min_replicas = 0 }` stops paying for an idle replica |
 | `app_image_tag` | `null` | Never by hand: the app phase writes it after you approve the app plan |
+| `reprint_image_tag` | `null` | Never by hand: the reprint phase writes it after you approve the reprint plan |
+| `reprint_min_replicas` | `1` | Between sessions, `0` stops paying for the reprint request server's idle replica; the first approved request then waits for a cold start. It never runs more than one replica |
 | `container_registry_sku` | `Basic` | You want a larger registry tier |
 | `app_local_redirect_uris` | `[]` | You run the app locally against this deployment: `["http://localhost:3000/redirect.html"]` |
 | `telemetry` | `{ retention_days = 30 }` | You keep logs and traces longer, up to 730 days |
@@ -245,7 +249,7 @@ terraform apply platform.tfplan
 terraform output
 ```
 
-Defaults provision F2 Fabric capacity, empty DEV/TEST workspaces, a native DEV/TEST deployment pipeline, Foundry with its `agent`, `chat` and `embedding` model deployments, a global G3 Web IQ account, serverless (preview) AI Search, Log Analytics and Application Insights with Foundry's tracing connection, and the app's hosting: a container registry, a Container Apps environment, the app's managed identity and its sign-in registration. With `work_iq_enabled = true`, the plan also creates the Work IQ registration and Foundry's `work-iq` connection. **Workspace bootstrap and knowledge setup are still pending**; the container app waits for the app phase's image, and step 7 publishes the agents. A GitHub credentials connection is created only with `fabric_git_enabled = true`; its PAT stays ephemeral/write-only, and rotation uses `github_token_version`. No separate Blob account or private networking is created.
+Defaults provision F2 Fabric capacity, empty DEV/TEST workspaces, a native DEV/TEST deployment pipeline, Foundry with its `agent`, `chat` and `embedding` model deployments, a global G3 Web IQ account, serverless (preview) AI Search, Log Analytics and Application Insights with Foundry's tracing connection, and the app's hosting: a container registry, a Container Apps environment, the app's managed identity and its sign-in registration. The plan also prepares the [reprint request server](#reprint-request): its API registration with the deployer's approval role, its connection's OAuth client, Foundry's `reprint-request` connection and the server's managed identity. With `work_iq_enabled = true`, the plan also creates the Work IQ registration and Foundry's `work-iq` connection. **Workspace bootstrap and knowledge setup are still pending**; the two container apps wait for the reprint and app phases' images, and step 7 publishes the agents. A GitHub credentials connection is created only with `fabric_git_enabled = true`; its PAT stays ephemeral/write-only, and rotation uses `github_token_version`. No separate Blob account or private networking is created.
 
 The serverless preview fails provisioning when a managed identity is requested and answers HTTP 500 to identity updates while applying them. Terraform therefore creates it without one; the runner then enables the system-assigned identity, and the knowledge apply grants it. By hand:
 
@@ -265,10 +269,12 @@ reviewed, published `workspace/` definitions through Fabric's **Bulk Import Item
 Definitions** API and attaches `Bootstrap`. It uses the signed-in Azure user,
 not a PAT, and does not connect Fabric to GitHub.
 
-Every item in `workspace/` is included: `Books`, `SeedBooks`, `ComputeBookSignals`,
-`BooksOntology`, `BindBooks`, `PublishBooksKnowledge` and `Bootstrap`. The plan
-deploys the lakehouse, runs the seeder and the signal notebook, deploys the ontology,
-then runs its binder; separately, after the lakehouse, it runs `PublishBooksKnowledge`.
+Every item in `workspace/` is included: `Books`, `SeedBooks`, `BookEvents`,
+`BookSignals`, `ComputeBookSignals`, `BooksOntology`, `BindBooks`,
+`PublishBooksKnowledge` and `Bootstrap`. The plan deploys the lakehouse, runs the
+seeder, deploys the `BookEvents` Eventhouse and its `BookSignals` KQL database, runs
+the signal notebook, deploys the ontology, then runs its binder; separately, after
+the lakehouse, it runs `PublishBooksKnowledge`.
 The runner resumes accepted operations, checks every imported item and never
 overwrites existing definitions. It also runs `PublishBooksKnowledge` whenever DEV
 has no completed run of it. To add that notebook to a DEV bootstrapped without it,
@@ -278,7 +284,16 @@ already did. If plan attachment is unavailable, it stops for explicit
 `--bootstrap-fallback notebooks` approval before importing and running the
 notebooks separately.
 
-The seeder creates the fictional book portfolio's tables, such as `dbo.titles` (8 rows) and `dbo.weekly_sales` (26 weeks), and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes; `ComputeBookSignals` then derives the latest week's `dbo.title_signals`, `dbo.decision_options` and `dbo.title_performance` ([data contract](../scenario/data/README.md)). Both resolve `Books` in the **current workspace**, use GUID-based OneLake paths, and require no default lakehouse attachment. Seeder reruns only insert missing demo keys and create the file if absent; they do not overwrite edits or delete other data. Run one seeder per workspace at a time. It refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled.
+A DEV bootstrapped before the [reprint request](#reprint-request) has older
+`ComputeBookSignals` and `Bootstrap` definitions and no `BookEvents` or
+`BookSignals`, so `up` stops at `bootstrap`. Review the `git diff` commands it
+prints, then rerun with `--update-definitions` and approve `item-update=<sha12>`:
+the runner replaces those two definitions, imports the Eventhouse and the KQL
+database with the plan attached and runs `ComputeBookSignals` again, which appends
+its first run to `BookSignals`. The reprint request server reads the week's signals
+and options only from there.
+
+The seeder creates the fictional book portfolio's tables, such as `dbo.titles` (8 rows) and `dbo.weekly_sales` (26 weeks), and `Files/documents/starter.txt`, which the default `documents` knowledge folder indexes. `ComputeBookSignals` then copies any reprint requests recorded in `BookSignals` into `dbo.reprint_requests`, insert-only by `request_id`, derives the latest week's `dbo.title_signals`, `dbo.decision_options` and `dbo.title_performance`, and appends that run to `BookSignals` ([data contract](../scenario/data/README.md)). Both resolve `Books`, and `ComputeBookSignals` also `BookSignals`, in the **current workspace**, use GUID-based OneLake paths, and require no default lakehouse attachment. Seeder reruns only insert missing demo keys and create the file if absent; they do not overwrite edits or delete other data. Run one seeder per workspace at a time. It refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled.
 
 `PublishBooksKnowledge` writes the six [approved documents](../scenario/knowledge/README.md), embedded with their reviewed SHA-256 digests, beside `starter.txt`. It resolves `Books` the same way and, like the seeder, refuses workspace names other than `*-dev` / `*-test` unless `allow_other_workspaces` is explicitly enabled. It is insert-only: it writes a missing file, leaves an identical one alone, refuses before writing anything when an existing file holds different content, and reads every file back. Publish a revision under a new versioned file name; the `documents` source indexes new files on its next five-minute run.
 
@@ -287,7 +302,7 @@ Run `BindBooks` as an **authorized Fabric user**: service-principal NotebookUtil
 | Case | Flag |
 | --- | --- |
 | The tenant rejects plan attachment (`FeatureNotAvailable`) | `--bootstrap-fallback notebooks` imports without the plan, then runs `SeedBooks`, `ComputeBookSignals`, `BindBooks` and `PublishBooksKnowledge` in order. Never change a tenant setting instead. |
-| A deployed notebook, ontology or plan differs from the checkout | `--update-definitions`. Review each printed `git diff` command, then approve with `--approve item-update=<sha12>`; `--yes` cannot. Lakehouses are never replaced, and updated bootstrap notebooks, with the notebooks that read their output, run again before the binding is re-verified. |
+| A deployed notebook, ontology or plan differs from the checkout | `--update-definitions`. Review each printed `git diff` command, then approve with `--approve item-update=<sha12>`; `--yes` cannot. Lakehouses, Eventhouses and KQL databases hold data and are never replaced, and updated bootstrap notebooks, with the notebooks that read their output, run again before the binding is re-verified. |
 | An import or notebook run failed | Inspect and fix the cause, then rerun with `--retry-failed`. |
 
 ### Optional Git synchronization
@@ -384,6 +399,78 @@ consumes Copilot Credits. The `verify` phase makes no Work IQ call: it checks th
 `work_iq` output's tenant, connection and redirect URL and the `WorkIQAgent.Ask`
 grant. Without a tenant that meets these prerequisites, Work IQ stays unverified.
 
+## Reprint request
+
+Every agent tool only reads, except one: the with-IQ agent's reprint request tool
+(`require_approval: always`) proposes a reprint request, and the signed-in user
+approves or rejects it in the app. Foundry then calls the
+[reprint request server](../scenario/workflows/reprint-request/README.md), its own
+container app `ca-<prefix>-mcp`, as that user. The server checks their token, their
+approval role against the decision authority matrix (BKS-GOV-003) and every value
+against the week's governed option, then records the request in the `BookSignals`
+KQL database as its own managed identity
+([runtime integration](runtime-integration.md#reprint-request)).
+
+The platform plan creates the reprint API registration `<project>-reprint-api`,
+with the delegated scope `ReprintRequest.Submit` and four approval roles, the
+matrix's production line: Production planning manager, Head of production
+planning, Publishing director and Managing director. Terraform gives you, the
+deployer, the Publishing director role, which approves the storyline's expedited
+reprint; assigning anyone else a role is an operator step
+([access model](runtime-integration.md#access-model)). The plan also creates the
+connection's OAuth client `<project>-reprint-client`, a public client without a
+secret whose only redirect URI is Foundry's consent-service URL, Foundry's
+`reprint-request` connection, with OAuth identity passthrough like Work IQ's, and
+the server's managed identity, whose only Azure role is `AcrPull` on the registry.
+`terraform -chdir=infra output reprint_request` prints the server's endpoint and URL,
+both registrations, the approval roles and the administrator's consent link.
+
+The `reprint` phase runs after `verify` and before the agents:
+
+| What it does | How | Approval |
+| --- | --- | --- |
+| Find the `BookSignals` KQL database in DEV and its Kusto database name | Fabric's KQL database API, then `.show databases` | None |
+| Grant the server's identity Database Viewer and Database Ingestor on that database, as you, unless it holds them | `.add database ['<database>'] viewers` and `ingestors`, for `'aadapp=<identity client ID>;<tenant ID>'` | `reprint-roles` |
+| Build the image from the committed files under `scenario/workflows/reprint-request/`, tagged with their digest, unless the registry has it | `az acr build --image reprint-request:<tag>` | `reprint-build` |
+| Plan the server's container app with the new tag; once you approve, write it as `reprint_image_tag` in `infra/terraform.tfvars` and apply | `terraform plan -var reprint_image_tag=<tag>`, `terraform apply` | `--approve reprint=<sha12>` |
+| Wait until the server answers, then until its own identity sees both roles | `GET /healthz`, `GET /readyz` | None |
+| Grant the connection's OAuth client `ReprintRequest.Submit` and Microsoft Graph's `offline_access` tenant-wide, if missing | Microsoft Graph, as you | None; with `--manual-grants`, an administrator grants them at the `reprint_request` output's `api_permissions_url` |
+
+A ready server proves that it runs the reviewed image and that its identity can
+read and append; it is not proof of a write. The runner refuses uncommitted or
+untracked server files, and a rerun builds, grants and changes nothing that is
+unchanged. The
+[native request contract](../.github/skills/deploy-platform/references/native-requests.md#the-reprint-request-server)
+lists the phase's requests, for review and diagnosis.
+
+Each user consents once to the reprint request tool, through the consent card the
+app shows, which asks to submit requests as them; it can appear on their first
+with-IQ question after the server is deployed. To act, ask with IQ to submit a
+reprint request, such as "Submit a reprint request for The Glass Orchard". The agent
+reads the week's inventory risk and its reprint options through Fabric IQ and
+proposes one option's exact values; the app shows them all on an approval card with
+**Approve** and **Reject**. Reject submits nothing. Approve sends the call: the
+server records it, naming you as the approver, when your role covers it, and the
+answer cites it as `[A1]`. The server refuses when your role doesn't cover the
+option, when a value differs from the governed option or when a request for the
+same edition and territory already actions the risk, and the answer says why. The
+next `ComputeBookSignals` run copies the request into the lakehouse, which marks
+the inventory risk *Actioned*; run it in Fabric or through the
+[Job Scheduler API](../cicd/README.md#running-only-the-seeder).
+
+DEV can't take an approval back: the request stays in `BookSignals`, and its copy in
+`dbo.reprint_requests` is insert-only. So approve only when you mean to act; the
+[evals](../scenario/evals/README.md) and the readiness checks only ever reject.
+
+The Eventhouse runs on the Fabric capacity and suspends when idle; its first query
+afterwards takes a few seconds to resume it. The server keeps one warm replica
+(`reprint_min_replicas = 1`); `0` saves its idle cost, and the first call after a
+quiet period then waits for a cold start. It never runs more than one replica,
+because it serializes each check and write in process. Until a first live run
+proves them, two details stay unverified: importing the Eventhouse and KQL database
+with the plan attached, and Fabric's Kusto database naming, which the server
+resolves by the database's item ID or display name.
+
 ## 6. Complete knowledge setup
 
 Rerun `up`. The knowledge phase writes `knowledge_lakehouse_id`, the `Books` lakehouse's physical GUID, and the `scenario` entry of `knowledge_ontologies`, with `BooksOntology`'s physical GUID, into the **same** `terraform.tfvars` with the [knowledge helper](../.github/skills/deploy-platform/scripts/configure_knowledge.py), then saves an untargeted plan; approve it with `--approve knowledge=<sha12>`. By hand, set the same two values:
@@ -441,12 +528,14 @@ Use the native DEV/TEST deployment pipeline and explicitly attach the plan when 
 
 The template ships two [Foundry prompt agents](../agents/README.md), the variants
 of one agent, and the [web app](../app/README.md) that asks them from Azure
-Container Apps. Start after step 6 succeeds. [Runtime integration](runtime-integration.md)
-explains the identity flow, access model and evidence.
+Container Apps. Start after step 6 succeeds; the `reprint` phase first deploys the
+[reprint request server](#reprint-request) that the with-IQ agent's one action
+calls. [Runtime integration](runtime-integration.md) explains the identity flow,
+access model and evidence.
 
 | Variant | Agent name | Definition | Tools |
 | --- | --- | --- | --- |
-| Book performance assistant – with IQ | `<project>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ ontology, as the user; Foundry IQ knowledge and Web IQ public context, as the project; Work IQ mail, as the user, only with `work_iq_enabled` |
+| Book performance assistant – with IQ | `<project>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ ontology, as the user; Foundry IQ knowledge and Web IQ public context, as the project; the approval-gated reprint request, as the user; Work IQ mail, as the user, only with `work_iq_enabled` |
 | Book performance assistant – without IQ | `<project>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
 
 Both share a byte-identical `agent.json` (the model deployment and reasoning
@@ -470,11 +559,14 @@ The `agent` and `app` phases do this; don't do it by hand:
 | Check that the app answers `/healthz` and serves this deployment's sign-in registration | `GET /healthz`, `GET /api/config` | None |
 
 A rerun publishes and builds nothing that hasn't changed. Change an agent in its
-`agents/` folder or the app in `app/`, commit, and rerun `up`; the app phase refuses
-uncommitted or untracked app files. The
+`agents/` folder, the app in `app/` or the reprint request server in
+`scenario/workflows/reprint-request/`, commit, and rerun `up`; the reprint and app
+phases refuse uncommitted or untracked files of their image. The
 [native request contract](../.github/skills/deploy-platform/references/native-requests.md#foundry-agents-and-the-app)
-lists the requests behind both phases, for review and diagnosis. Where ACR Tasks is
-not available, build and push the tag the runner printed yourself, then rerun:
+lists the requests behind the agent and app phases, for review and diagnosis. Where
+ACR Tasks is not available, build and push the tag the runner printed yourself, then
+rerun; for the reprint request server, use its folder and the `reprint-request`
+repository instead:
 
 ```sh
 az acr login --name "<registry>"
@@ -489,21 +581,27 @@ your work account:
 1. At first sign-in, consent to the app's access to Microsoft Foundry for you,
    unless an administrator granted it for everyone.
 2. Ask **With IQ**: "What needs my attention this week?" Expect **The Glass
-   Orchard** and its forecast variance from the live ontology, cited `[D1]`. The first Fabric
-   IQ call shows a consent card with Microsoft's link: accept, then ask again.
-   Fabric IQ and, with Work IQ, Work IQ each ask once per user; Foundry IQ and Web
-   IQ use the project's identity and never ask.
+   Orchard** and its forecast variance from the live ontology, cited `[D1]`. When a
+   tool first needs your permission, the app shows a consent card with Microsoft's
+   link: accept, then ask again. Fabric IQ, the reprint request tool and, with Work
+   IQ, Work IQ each ask once per user; Foundry IQ and Web IQ use the project's
+   identity and never ask.
 3. Select **Ask both** to compare the answer with IQ against the one without, and
    ask a follow-up to continue the same conversation. A live answer can take a
    minute; the server waits at most 225 seconds.
-4. Ask the other sample questions, or run the [scenario evals](../scenario/evals/README.md)
-   from the deployment checkout, which ask every case as you and judge the tool calls,
-   sources and figures: `python3 .github/skills/runtime-integration/scripts/run_evals.py`.
+4. Ask **With IQ**: "Submit a reprint request for The Glass Orchard." Check every
+   value on the approval card, then select **Reject**: the answer says nothing was
+   submitted. Approve only when you mean to act; DEV can't take it back
+   ([reprint request](#reprint-request)).
+5. Ask the other sample questions, or run the [scenario evals](../scenario/evals/README.md)
+   from the deployment checkout, which ask every case as you, judge the tool calls,
+   sources and figures, and reject the one reprint request a case proposes:
+   `python3 .github/skills/runtime-integration/scripts/run_evals.py`.
 
 This proves the route for your account only. Other users need an operator to grant
-them a Foundry role and Fabric access from the
-[access model](runtime-integration.md#access-model); the template assigns none.
-Second-user isolation stays unverified until a second account proves it.
+them a Foundry role and Fabric access and, to approve reprint requests, an approval
+role from the [access model](runtime-integration.md#access-model); the template
+assigns none. Second-user isolation stays unverified until a second account proves it.
 
 ### Tracing
 
@@ -522,7 +620,8 @@ content sit in a protected table that only you, the deployer, can read
 
 - **Isolation:** start each project with new state; never copy another project's tfvars, state, or `.terraform/`. Once deployed, retain state and keep `project_name` stable. Use an encrypted, access-controlled remote backend with a separate state key per project before team/CI use.
 - **Identity lifecycle:** the deployment app registration shares that project's state with the platform. Full plans still require access to its Entra objects. Fabric resources depend on the identity module so Terraform tears them down before removing the login registration. Do not remove those dependencies, target-destroy the module, or delete the registration manually while Fabric resources still need it.
-- **Secrets:** state/plans can contain provider-returned secrets; the Search admin key is read ephemerally on each run and is not stored. Keep state, PATs, tfvars, and debug logs out of Git. OneLake uses Entra authentication; runtime access uses managed identities and each signed-in user's own token. The web app holds no secret, Application Insights accepts no ingestion key, the Work IQ registration is a public client, and Web IQ is called keyless, as the Foundry project identity. Commit `.terraform.lock.hcl`.
-- **Scope/cost:** resources, notebook execution and retrieval are billable; endpoints, including the web app, are authenticated but public; ontology/deployment-plan/Foundry IQ features, the Fabric IQ agent tool, Web IQ and the serverless Search tier are preview (no SLA, no tier migration). Serverless bills compute per use, including each folder source's five-minute ingestion schedule. Semantic ranking and agentic retrieval use their standard plans: monthly free allowances, then pay-as-you-go. Only the DEV lakehouse's knowledge folders are indexed. Registered ontologies query their bound data live with end-user permissions; arbitrary tables/graphs/models are not automatically exposed. GlobalStandard model deployments bill per token, every Web IQ call is a billable search, and Work IQ calls consume Copilot Credits. TEST stays empty until promotion; the agents and app serve DEV only, and PROD provisioning is not included. Folder-source/embedding configuration changes rebuild the index.
-- **Between sessions:** the app keeps one warm replica by default. Pause the Fabric capacity in the Azure portal and set `app = { min_replicas = 0 }` when idle; resume the capacity before use, and expect a cold start on the first question ([troubleshooting](runtime-integration.md#troubleshooting)).
-- **Teardown:** use the [runner's `down` command](development.md#delete-the-environment) to delete everything in Terraform state, including the container app, the Foundry project with both agents, workspace data and Search ingestion assets. Retained Fabric workspaces, deleted Entra registrations and Web IQ portal credentials need manual cleanup.
+- **Secrets:** state/plans can contain provider-returned secrets; the Search admin key is read ephemerally on each run and is not stored. Keep state, PATs, tfvars, and debug logs out of Git. OneLake uses Entra authentication; runtime access uses managed identities and each signed-in user's own token. The web app and the reprint request server hold no secret, Application Insights accepts no ingestion key, the Work IQ registration and the reprint connection's OAuth client are public clients, and Web IQ is called keyless, as the Foundry project identity. Commit `.terraform.lock.hcl`.
+- **Scope/cost:** resources, notebook execution and retrieval are billable; endpoints, including the web app and the reprint request server, are authenticated but public; ontology/deployment-plan/Foundry IQ features, the Fabric IQ agent tool, Web IQ and the serverless Search tier are preview (no SLA, no tier migration). Serverless bills compute per use, including each folder source's five-minute ingestion schedule. Semantic ranking and agentic retrieval use their standard plans: monthly free allowances, then pay-as-you-go. Only the DEV lakehouse's knowledge folders are indexed. Registered ontologies query their bound data live with end-user permissions; arbitrary tables/graphs/models are not automatically exposed. GlobalStandard model deployments bill per token, every Web IQ call is a billable search, and Work IQ calls consume Copilot Credits. The `BookEvents` Eventhouse runs on the Fabric capacity and suspends when idle. TEST stays empty until promotion; the agents, the app and the reprint request server serve DEV only, and PROD provisioning is not included. Folder-source/embedding configuration changes rebuild the index.
+- **One action:** an approved reprint request is permanent in DEV. Approve one only when you mean to act; evals and readiness checks only ever reject ([reprint request](#reprint-request)).
+- **Between sessions:** the app and the reprint request server each keep one warm replica by default. Pause the Fabric capacity in the Azure portal and set `app = { min_replicas = 0 }` and `reprint_min_replicas = 0` when idle; resume the capacity before use, and expect a cold start on the first question ([troubleshooting](runtime-integration.md#troubleshooting)).
+- **Teardown:** use the [runner's `down` command](development.md#delete-the-environment) to delete everything in Terraform state, including both container apps, the Foundry project with both agents, workspace data with the recorded reprint requests, and Search ingestion assets. Retained Fabric workspaces, deleted Entra registrations, including the reprint server's API and OAuth client, and Web IQ portal credentials need manual cleanup.

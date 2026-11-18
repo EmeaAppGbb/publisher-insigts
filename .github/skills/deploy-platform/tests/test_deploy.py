@@ -36,6 +36,8 @@ KNOWLEDGE = "17171717-1717-4717-8717-171717171717"
 KNOWLEDGE_JOB = "18181818-1818-4818-8818-181818181818"
 SQL_ENDPOINT = ("example-endpoint.datawarehouse.fabric.microsoft.com", "14141414-1414-4414-8414-141414141414")
 RERUN_JOB = "13131313-1313-4313-8313-131313131313"
+EVENTHOUSE = "19191919-1919-4919-8919-191919191919"
+KQL = "20202020-2020-4020-8020-202020202020"
 TENANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 COMMIT = "c" * 40
 # The deployed scenario's names and identities, so these tests follow the SCENARIO descriptor.
@@ -216,6 +218,8 @@ ITEMS = {"value": [
     {"id": ONTOLOGY, "type": "Ontology", "displayName": NAMES["ontology"], "workspaceId": WORKSPACE},
     {"id": BIND, "type": "Notebook", "displayName": NAMES["bind"], "workspaceId": WORKSPACE},
     {"id": KNOWLEDGE, "type": "Notebook", "displayName": NAMES["knowledge"], "workspaceId": WORKSPACE},
+    {"id": EVENTHOUSE, "type": "Eventhouse", "displayName": NAMES["eventhouse"], "workspaceId": WORKSPACE},
+    {"id": KQL, "type": "KQLDatabase", "displayName": NAMES["kql"], "workspaceId": WORKSPACE},
 ]}
 RUNS = ((SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), (BIND, BIND_JOB), (KNOWLEDGE, KNOWLEDGE_JOB))
 
@@ -917,14 +921,16 @@ class ScenarioContractTests(unittest.TestCase):
                                                  ("signals", "Notebook", "ComputeBookSignals"),
                                                  ("ontology", "Ontology", "BooksOntology"),
                                                  ("bind", "Notebook", "BindBooks"),
-                                                 ("knowledge", "Notebook", "PublishBooksKnowledge")))
+                                                 ("knowledge", "Notebook", "PublishBooksKnowledge"),
+                                                 ("eventhouse", "Eventhouse", "BookEvents"),
+                                                 ("kql", "KQLDatabase", "BookSignals")))
         self.assertEqual((deploy.SCENARIO.plan, deploy.SCENARIO.registration, deploy.SCENARIO.expression),
                          ("Bootstrap", "scenario", "BooksLakehouse"))
         self.assertEqual(deploy.SCENARIO.tables, ("titles", "editions", "campaigns", "title_signals", "decision_options",
                                                   "title_performance", "reprint_requests"))
         self.assertEqual([(step.item, step.parameters, step.skip_completed) for step in deploy.SCENARIO.runs], [
             ("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
-            ("signals", {"lakehouse_name": "Books"}, True),
+            ("signals", {"lakehouse_name": "Books", "kql_database_name": "BookSignals"}, True),
             ("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
             ("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True)])
         self.assertEqual([step.reads for step in deploy.SCENARIO.runs], [(), ("seed",), (), ()])
@@ -945,6 +951,8 @@ class ScenarioContractTests(unittest.TestCase):
             self.assertLessEqual(set(step.reads), {earlier.item for earlier in deploy.SCENARIO.runs[:index]})
             self.assertEqual(step.parameters["lakehouse_name"], lakehouse)
             self.assertEqual(step.parameters.get("ontology_name", ontology), ontology)
+            self.assertEqual(step.parameters.get("kql_database_name", deploy.scenario_name("kql")),
+                             deploy.scenario_name("kql"))
         # One single-entity question, with the IsMaterial value quoted, about rows only the live ontology holds.
         self.assertTrue(deploy.SCENARIO.ontology_question.startswith(f"Using the live {ontology}, which TitleSignal rows"))
         self.assertIn('IsMaterial value "Yes"', deploy.SCENARIO.ontology_question)
@@ -1963,7 +1971,7 @@ class SignInTests(unittest.TestCase):
         probes = ctx.shell.matching(command("az", "account", "get-access-token"))
         self.assertEqual({requested_audience(call) for call in probes},
                          {deploy.ARM_API + "/", deploy.GRAPH_API, deploy.FABRIC_API, "api://client/.default",
-                          deploy.SEARCH_RESOURCE, deploy.FOUNDRY_SCOPE})
+                          deploy.SEARCH_RESOURCE, deploy.KUSTO_RESOURCE, deploy.FOUNDRY_SCOPE})
         self.assertTrue(all(call[call.index("--tenant") + 1] == TENANT for call in probes))
         for expected in ("GitHub CLI for example/demo-repo", f"Azure CLI in tenant {TENANT}", "Microsoft Foundry"):
             self.assertIn(expected, summary)
@@ -2022,12 +2030,13 @@ class SignInTests(unittest.TestCase):
         self.assertIn("Run: gh auth login --hostname github.com --git-protocol https --web", stop.exception.next_steps)
         self.assertEqual(ctx.shell.calls, [["gh", "auth", "status", "--hostname", "github.com"]])
 
-    def test_foundry_is_signed_in_to_only_when_the_agent_phase_runs(self):
-        for through, expected in (("verify", False), ("agent", True)):
+    def test_foundry_and_the_kql_database_are_signed_in_to_only_when_their_phases_run(self):
+        for through, kql, foundry in (("verify", False, False), ("reprint", True, False), ("agent", True, True)):
             with self.subTest(through=through):
                 ctx = self.context(SIGNED_IN, deploy.PHASES[:deploy.PHASES.index(through) + 1])
-                self.assertEqual(("Microsoft Foundry", {"scope": deploy.FOUNDRY_SCOPE}) in deploy.token_audiences(ctx),
-                                 expected)
+                audiences = deploy.token_audiences(ctx)
+                self.assertEqual(("the KQL database", {"resource": deploy.KUSTO_RESOURCE}) in audiences, kql)
+                self.assertEqual(("Microsoft Foundry", {"scope": deploy.FOUNDRY_SCOPE}) in audiences, foundry)
 
     def test_only_the_token_audiences_that_fail_are_signed_in_again(self):
         def token(args, options):
@@ -2327,9 +2336,10 @@ class StateAndCliTests(unittest.TestCase):
                     contextlib.redirect_stderr(io.StringIO()):
                 deploy.parse_arguments(["up", "--approve", value])
             self.assertEqual(stop.exception.code, deploy.USAGE)
-        self.assertEqual(set(deploy.APPROVAL_KEYS), {"identity", "platform", "knowledge", "app", "destroy", "item-update",
-                                                     "knowledge-registration", "agent-publish", "app-build",
-                                                     "purge-foundry", "shared-action-group"})
+        self.assertEqual(set(deploy.APPROVAL_KEYS), {"identity", "platform", "knowledge", "reprint", "app", "destroy",
+                                                     "item-update", "knowledge-registration", "agent-publish",
+                                                     "app-build", "reprint-build", "reprint-roles", "purge-foundry",
+                                                     "shared-action-group"})
         self.assertEqual(set(deploy.DESTRUCTIVE_APPROVALS), {"destroy", "purge-foundry", "item-update",
                                                              "shared-action-group"})
 
@@ -2376,9 +2386,11 @@ class AgentAndAppTests(unittest.TestCase):
     SEARCH = "https://srch.search.windows.net"
     AGENTS = {"with_iq": ("demo-with-iq", "Book performance assistant – with IQ"),
               "without_iq": ("demo-without-iq", "Book performance assistant – without IQ")}
-    WITH_IQ_TOOLS = ["fabric_iq_ontology", "foundry_iq_knowledge", "web_iq_public_context", "work_iq_mail"]
+    WITH_IQ_TOOLS = ["fabric_iq_ontology", "foundry_iq_knowledge", "reprint_request", "web_iq_public_context",
+                     "work_iq_mail"]
     REGISTRY = "crdemoab12"
     APP_URL = "https://ca-demo.blue-sea-123.swedencentral.azurecontainerapps.io"
+    REPRINT_URL = "https://ca-demo-mcp.blue-sea-123.swedencentral.azurecontainerapps.io"
     CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
     APP_PRINCIPAL = "acacacac-acac-4cac-8cac-acacacacacac"
     FOUNDRY_PRINCIPAL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -2396,7 +2408,8 @@ class AgentAndAppTests(unittest.TestCase):
                 "knowledge_base": {"name": "demo-knowledge-mcp",
                                    "server_url": f"{self.SEARCH}/knowledgebases/demo-knowledge/mcp?api-version=v1"},
                 "public_context": {"name": "web-iq", "server_url": "https://api.microsoft.ai/v3/mcp"},
-                "work_iq_mail": mail if work_iq else None},
+                "work_iq_mail": mail if work_iq else None,
+                "reprint_request": {"name": "reprint-request", "server_url": f"{self.REPRINT_URL}/mcp"}},
             "fabric_iq_connections": {deploy.SCENARIO.registration: {
                 "name": "fabric-iq-scenario", "server_url": f"https://api.fabric.microsoft.com/v1/mcp/dataPlane/"
                                                             f"workspaces/{WORKSPACE}/items/{ONTOLOGY}/ontologyEndpoint"}},
@@ -2465,6 +2478,10 @@ class AgentAndAppTests(unittest.TestCase):
         self.assertEqual(tools["foundry_iq_knowledge"]["project_connection_id"], "demo-knowledge-mcp")
         self.assertEqual((tools["web_iq_public_context"]["server_url"], tools["web_iq_public_context"]["project_connection_id"]),
                          ("https://api.microsoft.ai/v3/mcp", "web-iq"))
+        # The one tool that acts asks the user to approve each call, through its own server and connection.
+        self.assertEqual((tools["reprint_request"]["server_url"], tools["reprint_request"]["project_connection_id"],
+                          tools["reprint_request"]["require_approval"], tools["reprint_request"]["allowed_tools"]),
+                         (f"{self.REPRINT_URL}/mcp", "reprint-request", "always", ["submit_reprint_request"]))
         for method, url, body, headers in http.calls:
             self.assertEqual(headers["Authorization"], f"Bearer {TOKEN}")
         scopes = {call[call.index("--scope") + 1] for call in ctx.shell.matching(command("az", "account", "get-access-token"))}
@@ -2575,6 +2592,8 @@ class AgentAndAppTests(unittest.TestCase):
                 {"foundry_tool_connections": {**tools, "knowledge_base": None}},
             "missing from Terraform outputs: work_iq_mail_connection, work_iq_mail_mcp_endpoint":
                 {"foundry_tool_connections": {**tools, "work_iq_mail": None}},
+            "missing from Terraform outputs: reprint_request_connection, reprint_request_mcp_endpoint":
+                {"foundry_tool_connections": {**tools, "reprint_request": None}},
             "not a Foundry project endpoint": {"foundry_project_endpoint": "https://example.com/api/projects/demo"},
             "must name exactly the with_iq and without_iq agents": {"foundry_agents": {}},
             "with_iq entry must name": {"foundry_agents": {**self.outputs()["foundry_agents"],
@@ -2742,6 +2761,236 @@ class AgentAndAppTests(unittest.TestCase):
             self.assertIn(text, steps)
         for retired in ("ms app", "Power Platform", "rehearse", "presenter"):
             self.assertNotIn(retired, steps)
+
+
+class FakeKusto(FakeHttp):
+    """A KQL endpoint's management commands over an in-memory principal list; other routes behave as in FakeHttp."""
+
+    def __init__(self, origin, databases, principals=()):
+        super().__init__()
+        self.origin, self.databases, self.principals = origin, databases, list(principals)
+        # Refuses role changes, as for a user who can't manage the database's principals.
+        self.refuse_grants = False
+
+    def request(self, method, url, headers=None, body=None, timeout=120, attempts=None):
+        if method != "POST" or url != f"{self.origin}/v1/rest/mgmt":
+            return super().request(method, url, headers, body, timeout, attempts)
+        self.calls.append((method, url, body, dict(headers or {})))
+        self.attempts.append(attempts)
+        command = body["csl"]
+        if command == ".show databases":
+            return self.table(["DatabaseName", "PrettyName"], self.databases)
+        shown = re.fullmatch(r"\.show database \['([^']+)'\] principals", command)
+        if shown:
+            return self.table(["Role", "PrincipalType", "PrincipalFQN"],
+                              [[f"Database {shown[1]} {role}", "AAD Application", fqn] for role, fqn in self.principals])
+        added = re.fullmatch(r"\.add database \['([^']+)'\] (viewers|ingestors) \('([^']+)'\) 'reprint request server'",
+                             command)
+        if added and self.refuse_grants:
+            return reply(403, {"error": {"code": "Forbidden", "message": "Principal is not authorized."}})
+        if added and body.get("db") == added[1]:
+            self.principals.append(({"viewers": "Viewer", "ingestors": "Ingestor"}[added[2]], added[3]))
+            return self.table(["Role", "PrincipalType", "PrincipalFQN"], [])
+        raise AssertionError(f"unexpected KQL command: {command}")
+
+    @staticmethod
+    def table(columns, rows):
+        return reply(body={"Tables": [{"TableName": "Table_0", "Columns": [{"ColumnName": name} for name in columns],
+                                       "Rows": [list(row) for row in rows]}]})
+
+    def commands(self, prefix):
+        return [(body["csl"], body.get("db")) for method, url, body, _ in self.calls
+                if url.endswith("/v1/rest/mgmt") and body["csl"].startswith(prefix)]
+
+
+class ReprintPhaseTests(unittest.TestCase):
+    REGISTRY = "crdemoab12"
+    URL = "https://ca-demo-mcp.blue-sea-123.swedencentral.azurecontainerapps.io"
+    KUSTO = "https://trd-abc123.z1.kusto.fabric.microsoft.com"
+    IDENTITY = "abababab-abab-4bab-8bab-abababababab"
+    API = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc"
+    API_PRINCIPAL = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd"
+    CLIENT = "dededede-dede-4ede-8ede-dededededede"
+    CLIENT_PRINCIPAL = "efefefef-efef-4fef-8fef-efefefefefef"
+    GRAPH_PRINCIPAL = "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"
+    LISTING = ("100644 blob 3333333333333333333333333333333333333333\tscenario/workflows/reprint-request/Dockerfile\n"
+               "100644 blob 4444444444444444444444444444444444444444\tscenario/workflows/reprint-request/src/main.ts\n")
+
+    def registration(self, applied=None):
+        return {"mcp_endpoint": f"{self.URL}/mcp", "url": self.URL if applied else None, "name": "ca-demo-mcp",
+                "image_tag": applied, "repository": "reprint-request", "tenant_id": TENANT,
+                "connection_name": "reprint-request", "oauth_redirect_url": "https://global.consent.azure-apim.net/redirect",
+                "api_client_id": self.API, "client_id": self.CLIENT, "service_principal_object_id": self.CLIENT_PRINCIPAL,
+                "delegated_scopes": ["ReprintRequest.Submit"], "api_permissions_url": "https://portal.azure.com/#reprint",
+                "identity_client_id": self.IDENTITY, "kql_database": "BookSignals"}
+
+    def context(self, *, databases=((KQL, "BookSignals"),), principals=(), ready=(True,), status="", tags=()):
+        root = make_root(self)
+        tfvars = root / "infra" / "terraform.tfvars"
+        tfvars.write_text('project_name = "demo"\nreprint_image_tag = null # deploy.py sets it\n', encoding="utf-8")
+        tag = deploy.hashlib.sha256(self.LISTING.encode()).hexdigest()[:12]
+        built = list(tags)
+
+        def show_tags(args, options):
+            if not built:
+                return deploy.Result(1, "", "ERROR: Error: repository name not known to registry. Correlation ID: x.")
+            return deploy.Result(0, json.dumps(built))
+
+        def build(args, options):
+            built.append(tag)
+            return deploy.Result(0, "Run ID: ca2 was successful after 1m10s")
+
+        def output(args, options):
+            applied = re.search(r'(?m)^reprint_image_tag = "([0-9a-f]{12})"', tfvars.read_text(encoding="utf-8"))
+            values = {"dev_workspace_id": WORKSPACE, "reprint_request": self.registration(
+                applied[1] if applied and ctx.shell.matching(terraform("apply")) else None),
+                "container_registry": {"name": self.REGISTRY, "repository": "app"}}
+            return deploy.Result(0, json.dumps({name: {"value": value} for name, value in values.items()}))
+
+        def principal(args, options):
+            resource = args[args.index("--id") + 1]
+            return deploy.Result(0, json.dumps({"id": {self.API: self.API_PRINCIPAL,
+                                                       deploy.GRAPH_APP_ID: self.GRAPH_PRINCIPAL}[resource]}))
+
+        rules = [
+            TOKEN_RULE,
+            (command("az", "ad", "sp", "show"), principal),
+            (command("git", "status", "--porcelain"), deploy.Result(0, status)),
+            (command("git", "ls-tree", "-r", "HEAD"), deploy.Result(0, self.LISTING)),
+            (command("az", "acr", "repository", "show-tags"), show_tags),
+            (command("az", "acr", "build"), build),
+            (terraform("output"), output),
+            (terraform("console"), deploy.Result(0, json.dumps(json.dumps({"fabric_git_enabled": False})))),
+            *plan_rules([("azurerm_container_app.reprint[0]", ["create"])]),
+        ]
+        http = FakeKusto(self.KUSTO, [list(row) for row in databases], principals)
+        http.add("GET", rf"/workspaces/{WORKSPACE}/items$", reply(body=ITEMS))
+        http.add("GET", rf"/workspaces/{WORKSPACE}/kqlDatabases/{KQL}$",
+                 reply(body={"id": KQL, "workspaceId": WORKSPACE, "properties": {"queryServiceUri": self.KUSTO}}))
+        http.add("GET", r"/v1/rest/auth/metadata$",
+                 reply(body={"AzureAD": {"KustoServiceResourceId": "https://kusto.kusto.windows.net"}}))
+        api = {"consentType": "AllPrincipals", "resourceId": self.API_PRINCIPAL, "scope": "ReprintRequest.Submit"}
+        graph = {"consentType": "AllPrincipals", "resourceId": self.GRAPH_PRINCIPAL, "scope": "offline_access"}
+        # Each scope is missing until granted: the server's own, then Graph's.
+        http.add("GET", r"/oauth2PermissionGrants$", *[reply(body={"value": grants})
+                                                       for grants in ([], [api], [api], [api, graph])])
+        http.add("POST", r"/v1\.0/oauth2PermissionGrants$", reply(201, {}))
+        http.add("GET", r"/healthz$", reply(200))
+        http.add("GET", r"/readyz$", *[reply(200 if ok else 503, {"ready": ok, "roles": ["Viewer", "Ingestor"] if ok
+                                                                  else ["Viewer"]}) for ok in ready])
+        ctx = make_context(self, root, FakeShell(rules), http)
+        ctx.initialized = True
+        ctx.state.section("target").update(tenant_id=TENANT, subscription_id="sub", user_object_id="user")
+        return ctx, tag
+
+    def test_the_server_is_granted_its_roles_built_and_deployed_by_its_reviewed_plan(self):
+        ctx, tag = self.context()
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint-roles")
+        self.assertIn(f"({self.IDENTITY}) Database Viewer and Database Ingestor on KQL database BookSignals",
+                      stop.exception.message)
+        self.assertFalse(ctx.http.commands(".add"))
+        ctx.args.approve = {"reprint-roles": True}
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint-build")
+        # Exactly the two roles, on the database Kusto names, for the server's identity alone.
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        self.assertEqual(ctx.http.commands(".add"), [
+            (f".add database ['{KQL}'] viewers ('{principal}') 'reprint request server'", KQL),
+            (f".add database ['{KQL}'] ingestors ('{principal}') 'reprint request server'", KQL)])
+        ctx.args.approve = {"reprint-build": True}
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint")
+        build, = ctx.shell.matching(command("az", "acr", "build"))
+        context = "scenario/workflows/reprint-request"
+        self.assertEqual(build, ["az", "acr", "build", "--registry", self.REGISTRY, "--image", f"reprint-request:{tag}",
+                                 "--file", f"{context}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
+                                 context])
+        self.assertEqual(ctx.shell.matching(command("git", "status", "--porcelain"))[0][-2:], ["--", context])
+        plan, = ctx.shell.matching(terraform("plan"))
+        self.assertIn(f"-var=reprint_image_tag={tag}", plan)
+        self.assertIn("reprint_image_tag = null", (ctx.root / "infra" / "terraform.tfvars").read_text(encoding="utf-8"))
+        ctx.args.approve = {"reprint": stop.exception.approval["sha256"][:12]}
+        report = deploy.phase_reprint(ctx)
+        self.assertIn(f'reprint_image_tag = "{tag}" # deploy.py sets it',
+                      (ctx.root / "infra" / "terraform.tfvars").read_text(encoding="utf-8"))
+        self.assertIn(f"{self.URL} runs reprint-request:{tag}", report)
+        self.assertIn("Not proof of a write", report)
+        # The connection's client is granted exactly its declared scopes, on each scope's own resource.
+        grants = sorted((body["clientId"], body["resourceId"], body["scope"])
+                        for _, body in ctx.http.posts(r"oauth2PermissionGrants$"))
+        self.assertEqual(grants, sorted([(self.CLIENT_PRINCIPAL, self.API_PRINCIPAL, "ReprintRequest.Submit"),
+                                         (self.CLIENT_PRINCIPAL, self.GRAPH_PRINCIPAL, "offline_access")]))
+        self.assertEqual(len(ctx.shell.matching(command("az", "acr", "build"))), 1, "the image is built once")
+        self.assertEqual(len(ctx.http.commands(".add")), 2, "the roles are granted once")
+        self.assertEqual(ctx.state.section("reprint")["image_tag"], tag)
+        self.assertEqual(ctx.state.section("reprint")["roles"]["database"], KQL)
+
+    def test_held_roles_need_no_grant_and_a_display_named_database_resolves(self):
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        ctx, tag = self.context(databases=(("BookSignals", ""),), tags=[None],
+                                principals=(("Viewer", principal), ("Ingestor", principal)))
+        ctx.shell.rules.insert(0, (command("az", "acr", "repository", "show-tags"), deploy.Result(0, json.dumps([tag]))))
+        ctx.args.yes = True
+        self.assertIn(f"runs reprint-request:{tag}", deploy.phase_reprint(ctx))
+        self.assertFalse(ctx.http.commands(".add"))
+        self.assertFalse(ctx.shell.matching(command("az", "acr", "build")))
+        self.assertEqual({database for _, database in ctx.http.commands(".show database [")}, {"BookSignals"})
+
+    def test_an_ambiguous_or_foreign_database_is_never_granted(self):
+        for databases in (((KQL, "BookSignals"), ("BookSignals", "")), (("Other", "Other"),)):
+            with self.subTest(databases=databases):
+                ctx, _ = self.context(databases=databases)
+                ctx.args.yes = True
+                with self.assertRaisesRegex(deploy.Blocked, "exactly one BookSignals database"):
+                    deploy.phase_reprint(ctx)
+                self.assertFalse(ctx.http.commands(".add"))
+        ctx, _ = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(rf"/kqlDatabases/{KQL}$"), [reply(body={
+            "workspaceId": EVENTHOUSE, "properties": {"queryServiceUri": self.KUSTO}})]))
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Blocked, "outside DEV"):
+            deploy.phase_reprint(ctx)
+
+    def test_an_endpoint_without_sign_in_metadata_takes_kustos_documented_audience(self):
+        ctx, _ = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(r"/v1/rest/auth/metadata$"), [reply(404)]))
+        self.assertEqual(deploy.kusto_resource(ctx, self.KUSTO), deploy.KUSTO_RESOURCE)
+        ctx.forget()
+        ctx.http.routes.insert(0, ("GET", re.compile(r"/v1/rest/auth/metadata$"), [reply(503)]))
+        with self.assertRaisesRegex(deploy.Blocked, "sign-in metadata failed with HTTP 503"):
+            deploy.kusto_resource(ctx, self.KUSTO)
+
+    def test_a_refused_role_grant_names_the_grant_an_administrator_gives(self):
+        ctx, _ = self.context()
+        ctx.http.refuse_grants = True
+        ctx.args.yes = True
+        with self.assertRaises(deploy.MissingPermission) as stop:
+            deploy.phase_reprint(ctx)
+        grant, = stop.exception.grants
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        self.assertIn(f".add database ['{KQL}'] viewers ('{principal}') 'reprint request server' and "
+                      f".add database ['{KQL}'] ingestors ('{principal}') 'reprint request server'", grant)
+        self.assertFalse(ctx.http.principals)
+        self.assertFalse(ctx.shell.matching(command("az", "acr", "build")))
+
+    def test_uncommitted_server_files_are_never_built(self):
+        ctx, _ = self.context(status=" M scenario/workflows/reprint-request/src/main.ts\n")
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Blocked, "uncommitted changes"):
+            deploy.phase_reprint(ctx)
+        self.assertFalse(ctx.shell.matching(command("az", "acr")))
+
+    def test_a_server_that_never_sees_both_roles_is_not_ready(self):
+        ctx, _ = self.context(ready=(False,))
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Waiting, "does not see its KQL database roles"):
+            deploy.phase_reprint(ctx)
+        self.assertNotIn("verified_at", ctx.state.section("reprint"))
+        self.assertFalse(ctx.http.posts(r"oauth2PermissionGrants$"))
 
 
 class FoundryPreflightTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 # Native requests for guided DEV deployment
 
-Read this after choosing the derived repository, execution host and delegated user. It is the request contract that the [deterministic runner](../scripts/deploy.py) implements: use it to review the runner's behavior and diagnose a blocked run. Do not hand-submit mutating requests that a resumable run owns. Terraform owns infrastructure; Fabric APIs own bootstrap and notebook execution; the Foundry data plane owns the agents' versions, and ACR Tasks builds the app's image.
+Read this after choosing the derived repository, execution host and delegated user. It is the request contract that the [deterministic runner](../scripts/deploy.py) implements: use it to review the runner's behavior and diagnose a blocked run. Do not hand-submit mutating requests that a resumable run owns. Terraform owns infrastructure; Fabric APIs own bootstrap and notebook execution; Kusto management commands grant the reprint request server's KQL database roles; the Foundry data plane owns the agents' versions, and ACR Tasks builds the app's and the reprint request server's images.
 
 ## Contents
 
@@ -12,6 +12,7 @@ Read this after choosing the derived repository, execution host and delegated us
 - [Resolve and verify target bindings](#resolve-and-verify-target-bindings)
 - [Serverless Search identity](#serverless-search-identity)
 - [Knowledge readiness and retrieval](#knowledge-readiness-and-retrieval)
+- [The reprint request server](#the-reprint-request-server)
 - [Foundry agents and the app](#foundry-agents-and-the-app)
 - [Teardown](#teardown)
 
@@ -67,6 +68,7 @@ delegated scopes with the signed-in user's Azure CLI Microsoft Graph token:
 | --- | --- | --- | --- |
 | `fabric_user_auth` | Power BI Service | its `delegated_scopes` | `consent` phase |
 | The app's sign-in registration (`app` output) | Microsoft Foundry's API (`https://ai.azure.com`) | `user_impersonation` | `consent` phase once the platform apply created it, else the start of the `app` phase |
+| The reprint connection's OAuth client (`reprint_request` output) | The reprint API (`api_client_id`), then Microsoft Graph, each in its own grant | `ReprintRequest.Submit`; `offline_access` | End of the `reprint` phase, after the server is ready |
 | `work_iq`, only while its `enabled` is true | Work IQ | `WorkIQAgent.Ask` | `verify` phase |
 
 For each, it reads `GET https://graph.microsoft.com/v1.0/servicePrincipals/{client-sp-object-id}/oauth2PermissionGrants`
@@ -91,9 +93,12 @@ administrator's confirmation continues.
 The app's grant is optional: without it, each user consents to the app's
 Microsoft Foundry access at first sign-in where the tenant allows that. With
 `--manual-grants`, or when the grants cannot be read, the runner only reports
-the app's `api_permissions_url` and continues. Every user still consents once
-to the Fabric IQ connection and, with Work IQ, to the `work-iq` connection,
-through the link the app shows; no tenant-wide grant replaces that.
+the app's `api_permissions_url` and continues. The reprint client's grants are not
+optional: with `--manual-grants` the `reprint` phase waits for an administrator to
+grant them at the `reprint_request` output's `api_permissions_url`. Every user still
+consents once to the Fabric IQ connection, the `reprint-request` connection and,
+with Work IQ, the `work-iq` connection, through the link the app shows; no
+tenant-wide grant replaces that.
 
 ## Native item import (default)
 
@@ -146,7 +151,8 @@ resubmit an import.
 
 Only `--update-definitions` replaces an existing item's definition. Compare the
 digest the runner recorded for each live item with the reviewed bytes, and refuse
-lakehouses, items without a recorded definition and Git-synchronized workspaces.
+lakehouses, Eventhouses and KQL databases, which hold data, items without a
+recorded definition and Git-synchronized workspaces.
 Require an `item-update` approval of the sha256 over the workspace and each item's
 ID, type, logical ID and definition digest; `--yes` never grants it. Then, per item:
 
@@ -293,6 +299,57 @@ Web IQ isn't a knowledge source: the agents call its MCP server through the `web
 
 References: [Fabric ontology retrieval and response fields](https://learn.microsoft.com/azure/search/agentic-knowledge-source-how-to-fabric-ontology#query-a-knowledge-base), [ontology runtime parameters](https://learn.microsoft.com/javascript/api/@azure/search-documents/fabricontologyknowledgesourceparams?view=azure-node-preview), [OneLake runtime parameters](https://learn.microsoft.com/javascript/api/@azure/search-documents/indexedonelakeknowledgesourceparams?view=azure-node-preview).
 
+## The reprint request server
+
+The `reprint` phase uses the `reprint_request` and `container_registry` outputs and
+DEV's `BookSignals` KQL database. It first resolves the database:
+
+- `GET https://api.fabric.microsoft.com/v1/workspaces/{devWorkspaceId}/kqlDatabases/{kqlDatabaseId}`,
+  with the item ID from the DEV item listing by type and display name, must return
+  the DEV workspace and a `properties.queryServiceUri` on `*.kusto.fabric.microsoft.com`.
+- `GET {queryUri}/v1/rest/auth/metadata` names the token audience
+  (`AzureAD.KustoServiceResourceId`); a 404 takes Kusto's documented
+  `https://kusto.kusto.windows.net`. The runner uses the signed-in user's Azure CLI
+  token for it, which `signin` checks up front.
+- Management commands go to `POST {queryUri}/v1/rest/mgmt` with
+  `{"csl": "<command>"}`, plus `"db": "<database>"` for a database command, and that
+  bearer token; the first result table is the answer. `.show databases` must list
+  exactly one row whose `DatabaseName` or `PrettyName` is `BookSignals`, or whose
+  `DatabaseName` is the item ID. That `DatabaseName` names the database in every
+  later command.
+
+It then grants the server's identity its two roles, as the deployer. `.show database
+['<database>'] principals` lists the roles held; for each one that the identity
+(`aadapp=<identity client ID>;<tenant ID>`) lacks, after a `reprint-roles` approval:
+
+```text
+.add database ['<database>'] viewers ('aadapp=<identity client ID>;<tenant ID>') 'reprint request server'
+.add database ['<database>'] ingestors ('aadapp=<identity client ID>;<tenant ID>') 'reprint request server'
+```
+
+It reads the principals back and records the grant. It grants nothing else: no
+admin, user or workspace role. Both commands need Database Admin, which Fabric gives
+every DEV workspace Admin, Member and Contributor, such as its creator.
+
+The image follows the app's pattern below, for `scenario/workflows/reprint-request`:
+the tag is the first 12 hex characters of the sha256 of its `git ls-tree -r HEAD`
+listing, once `git status --porcelain --untracked-files=all` shows no change there;
+after a `reprint-build` approval, `az acr build --registry {registry} --image
+reprint-request:{tag} --file scenario/workflows/reprint-request/Dockerfile --platform
+linux/amd64 scenario/workflows/reprint-request`. The reviewed `reprint` plan carries
+`-var=reprint_image_tag={tag}`; the runner writes the tag into the one
+`reprint_image_tag` line of `infra/terraform.tfvars` only after the plan's approval,
+then applies it.
+
+Readiness reads the `reprint_request` output's `url`, whose `/mcp` must be the
+`mcp_endpoint` the connection names: `GET {url}/healthz` must return `200`, then
+`GET {url}/readyz` must return `200` with `ready: true` and `roles` holding `Viewer`
+and `Ingestor`, polled every 10 seconds for about three minutes while a new role
+applies. The server answers `/readyz` from its own identity's `.show database
+['<database>'] principal roles`. Last, the runner grants the connection's OAuth
+client its two scopes, as [Tenant-wide consent](#tenant-wide-consent) describes. It
+never calls the tool: none of this is proof of a write.
+
 ## Foundry agents and the app
 
 The `agent` phase calls Foundry Agent Service's data plane with the deployer's token for `https://ai.azure.com/.default`, on the `foundry_project_endpoint` output only, with `api-version=v1`:
@@ -315,7 +372,7 @@ Readiness reads the `app` output's URL: `GET {url}/healthz` must return `200`, p
 
 `deploy.py down` uses these supported native operations after explicit approvals:
 
-- Terraform: full saved `plan -destroy`, then `apply <approved-plan>`; no targeting. It deletes the container app, registry, the app's sign-in registration, the Work IQ registration and connection when enabled, and the Foundry account, whose project holds the agents.
+- Terraform: full saved `plan -destroy`, then `apply <approved-plan>`; no targeting. It deletes the container app, registry, the app's sign-in registration, the reprint request server's container app, identity, registrations and connection, the Work IQ registration and connection when enabled, and the Foundry account, whose project holds the agents. The KQL database roles go with the DEV workspace.
 - [Deleted Foundry account](https://learn.microsoft.com/en-us/rest/api/aiservices/accountmanagement/deleted-accounts/get?view=rest-aiservices-accountmanagement-2024-10-01): GET `/subscriptions/{subscription}/providers/Microsoft.CognitiveServices/locations/{location}/resourceGroups/{group}/deletedAccounts/{name}?api-version=2024-10-01`; `az cognitiveservices account purge` uses that same target, then GET must return 404.
 
 The runner preserves only cleanup identifiers from state, not keys or retrieved

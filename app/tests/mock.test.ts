@@ -4,20 +4,23 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
+import { approvalFields } from '../src/labels.ts'
 import type { ToolCall } from '../src/live/protocol.ts'
 import { parseReply } from '../src/live/reply.ts'
 import { CANCELLED, type TurnLog } from '../src/live/turn.ts'
-import { MOCK_ANSWERS, MOCK_CONSENT_URL, MOCK_SESSION, createMockClient } from '../src/mock/client.ts'
+import { MOCK_ANSWERS, MOCK_CONSENT_URL, MOCK_REPRINT, MOCK_SESSION, asksForReprint, createMockClient } from '../src/mock/client.ts'
 import { SAMPLES } from '../src/samples.ts'
 
 const app = fileURLToPath(new URL('../', import.meta.url))
+// The samples with a canned answer; a sample that asks to submit a reprint request plays the approval flow.
+const ANSWERED = SAMPLES.filter((sample) => !asksForReprint(sample.question))
 
 test('mock mode answers every sample question for both agents with its canned reply, through the same turn', async () => {
   const records: TurnLog[] = []
   const client = createMockClient({ delayMs: 0, log: (record) => { records.push(record) } })
   assert.equal(client.mode, 'mock')
-  assert.deepEqual(Object.keys(MOCK_ANSWERS), SAMPLES.map((sample) => sample.question))
-  for (const sample of SAMPLES) {
+  assert.deepEqual(Object.keys(MOCK_ANSWERS), ANSWERED.map((sample) => sample.question))
+  for (const sample of ANSWERED) {
     for (const variant of ['with_iq', 'without_iq'] as const) {
       const canned = MOCK_ANSWERS[sample.question][variant]
       const tools: ToolCall[] = []
@@ -39,6 +42,49 @@ test('mock mode answers every sample question for both agents with its canned re
     }
   }
   assert.ok(records.every((record) => record.event === 'app.turn'))
+})
+
+test('a reprint request plays the approval flow: the held request with the week’s option, then the approved or rejected answer', async () => {
+  const question = SAMPLES.find((sample) => asksForReprint(sample.question))?.question ?? 'Submit the recommended reprint request for The Glass Orchard'
+  assert.equal(asksForReprint('Raise a reprint request for The Glass Orchard'), true)
+  for (const other of ['Who may approve a reprint request for The Glass Orchard?', 'Submit a reprint request for Northbound Signals']) {
+    assert.equal(asksForReprint(other), false, other)
+  }
+  const client = createMockClient({ delayMs: 0 })
+  const tools: ToolCall[] = []
+  const held = await client.ask({ variant: 'with_iq', text: question }, undefined, (call) => tools.push(call))
+  assert.equal(held.status, 'needs-approval')
+  if (held.status !== 'needs-approval') return
+  assert.match(held.approval.id, /^mcpr_mock_[0-9a-f]{32}$/)
+  assert.deepEqual([held.approval.server, held.approval.tool], ['reprint_request', 'submit_reprint_request'])
+  assert.deepEqual(held.toolCalls.map((call) => [call.server, call.tool, call.state]), [['fabric_iq_ontology', 'ask_ontology', 'completed'], ['foundry_iq_knowledge', 'knowledge_base_retrieve', 'completed']])
+  assert.deepEqual(tools.map((call) => call.state), ['running', 'completed', 'running', 'completed'])
+  assert.deepEqual(approvalFields(held.approval).map((field) => [field.label, field.value]), [
+    ['Edition', 'ed-001-hb'], ['Territory', 'UK'], ['Quantity', '20,000'], ['Expedited', 'Yes'], ['Investment', '£50,000'],
+    ['Signal', 'sig-20261102-title-001-inv-ed-001-hb-uk'], ['Option', 'sig-20261102-title-001-inv-ed-001-hb-uk-expedite'],
+    ['Rationale', MOCK_REPRINT.approval.arguments.rationale], ['Evidence', MOCK_REPRINT.approval.arguments.evidence],
+  ])
+  assert.match(String(MOCK_REPRINT.approval.arguments.evidence), /sig-20261102-title-001-inv-ed-001-hb-uk.*BKS-POL-001 §6.*BKS-GOV-003 §1/)
+  const decide = (approve: boolean) => client.ask({ variant: 'with_iq', approval: { id: held.approval.id, approve }, previousResponseId: held.responseId })
+
+  const approved = await decide(true)
+  assert.equal(approved.status, 'answered')
+  if (approved.status !== 'answered') return
+  assert.deepEqual(approved.reply, parseReply(MOCK_REPRINT.approved.answer))
+  assert.deepEqual(approved.reply.markers.map((marker) => marker.id), ['A1', 'D1', 'F1'])
+  assert.deepEqual(approved.reply.sources[0], {
+    id: 'A1', kind: 'action', text: 'Reprint request · rr-20261102-title-001-inv-ed-001-hb-uk · Approved · Mock user (Publishing director) · 2026-11-18T10:15:00Z',
+  })
+  assert.deepEqual(approved.reply.usedIqs, ['fabric', 'foundry', 'action'])
+  assert.equal(approved.reply.steps.length, 3)
+  assert.deepEqual(approved.toolCalls.map((call) => [call.server, call.tool, call.state]), [['reprint_request', 'submit_reprint_request', 'completed']])
+
+  const rejected = await decide(false)
+  assert.deepEqual([rejected.status, rejected.toolCalls], ['answered', []])
+  assert.match(rejected.status === 'answered' ? rejected.reply.answer : '', /^\*\*Nothing was submitted: you rejected/)
+  const withoutIq = await client.ask({ variant: 'without_iq', text: question })
+  assert.deepEqual([withoutIq.status, withoutIq.toolCalls], ['answered', []])
+  assert.match(withoutIq.status === 'answered' ? withoutIq.reply.answer : '', /^\*\*Nothing was submitted: this version/)
 })
 
 test('other questions get a canned pointer to the samples, and a mock turn can be stopped', async () => {
@@ -87,9 +133,10 @@ test('a production build contains no mock text', async () => {
     assert.ok(bundle.includes('Sample questions'), 'the probe reads the app itself')
     const mockSource = readFileSync(new URL('../src/mock/client.ts', import.meta.url), 'utf8')
     const probes = [
-      MOCK_SESSION.notice ?? '', MOCK_CONSENT_URL, 'resp_mock_', 'canned answers for the sample questions only',
+      MOCK_SESSION.notice ?? '', MOCK_CONSENT_URL, 'resp_mock_', 'mcpr_mock_', 'canned answers for the sample questions only',
       // Each canned answer's bold lead.
-      ...Object.values(MOCK_ANSWERS).map((answers) => /\*\*(.+?)\*\*/.exec(answers.with_iq.answer)?.[1] ?? ''),
+      ...[...Object.values(MOCK_ANSWERS).map((answers) => answers.with_iq), MOCK_REPRINT.approved, MOCK_REPRINT.rejected, MOCK_REPRINT.withoutIq]
+        .map((canned) => /\*\*(.+?)\*\*/.exec(canned.answer)?.[1] ?? ''),
     ]
     for (const probe of probes) {
       assert.ok(probe && mockSource.includes(probe), `${probe} is mock text`)

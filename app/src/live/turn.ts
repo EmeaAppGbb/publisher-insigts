@@ -1,13 +1,14 @@
 // One question as one agent turn, without the browser, so it runs under Node tests: client.ts supplies the call to
 // the app server, which asks the variant's Foundry agent as the signed-in user. It never rejects: every outcome, a
 // cancelled turn included, is a TurnResult.
-import { iqOf, type ToolCall, type TurnOutcome } from './protocol.ts'
+import { isApprovalRequest, iqOf, type ToolCall, type TurnOutcome } from './protocol.ts'
 import { parseReply } from './reply.ts'
 import type { IqKey, Question, TurnResult, Variant } from './types.ts'
 
 export const CANCELLED = 'cancelled'
 
-// One question to the variant's agent, as its own Foundry run. cid labels the request and its trace.
+// One question, or one decision on an approval request, to the variant's agent, as its own Foundry run. cid labels
+// the request and its trace.
 export type Send = (question: Question, cid: string, signal: AbortSignal, onTool: (call: ToolCall) => void) => Promise<TurnOutcome>
 
 // Value-free by construction: no question or answer text, and no user or Foundry identifiers.
@@ -16,6 +17,7 @@ export interface TurnLog {
   correlationId: string
   variant: Variant
   followUp: boolean
+  decision?: 'approve' | 'reject'
   outcome: TurnResult['status'] | 'cancelled'
   elapsedMs: number
   usedIqs?: IqKey[]
@@ -53,6 +55,9 @@ function fromOutcome(outcome: TurnOutcome, elapsedMs: number): TurnResult {
     case 'needs-consent':
       if (!/^https:\/\//i.test(outcome.consentUrl)) return { status: 'failed', message: 'A tool asked for consent through an unsafe link.', ...common }
       return { status: 'needs-consent', consentUrl: outcome.consentUrl, ...(outcome.server ? { server: outcome.server } : {}), ...common }
+    case 'needs-approval':
+      if (!isApprovalRequest(outcome.approval)) return { status: 'failed', message: "The agent proposed a tool call the app can't show in full, so nothing ran.", ...common }
+      return { status: 'needs-approval', approval: outcome.approval, elapsedMs, responseId: outcome.responseId, toolCalls: outcome.toolCalls }
     case 'failed':
       return { status: 'failed', message: outcome.message, ...(outcome.code ? { code: outcome.code } : {}), ...common }
   }
@@ -112,6 +117,7 @@ export async function runTurn(options: TurnOptions): Promise<TurnResult> {
     correlationId,
     variant: options.question.variant,
     followUp: Boolean(options.question.previousResponseId),
+    ...(options.question.approval ? { decision: options.question.approval.approve ? 'approve' : 'reject' } : {}),
     outcome: result.status === 'failed' && result.code === CANCELLED ? 'cancelled' : result.status,
     elapsedMs: result.elapsedMs,
     ...(result.status === 'answered'

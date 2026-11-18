@@ -1,7 +1,8 @@
 // Mock mode only: `npm run dev:mock` (vite --mode mock). live/client.ts imports this module only behind a literal
 // import.meta.env.MODE === 'mock', so production builds never contain it. Canned answers for the sample questions
-// stand in for the agents, through the same turn as a live answer: tool calls, one consent request and the reply.
-import type { ToolCall, TurnOutcome } from '../live/protocol.ts'
+// stand in for the agents, through the same turn as a live answer: tool calls, one consent request and the reply. A
+// question that asks to submit or raise a reprint request for The Glass Orchard plays the approval flow instead.
+import type { ApprovalRequest, ToolCall, TurnOutcome } from '../live/protocol.ts'
 import { runTurn, type Send, type TurnLog } from '../live/turn.ts'
 import type { AgentClient, Session, Variant } from '../live/types.ts'
 import { SAMPLES } from '../samples.ts'
@@ -173,6 +174,93 @@ const FALLBACK: Canned = {
   answer: '**Mock mode has canned answers for the sample questions only.** Pick a sample question, or run `npm run dev` against a deployment to ask the live agents.',
 }
 
+// The week's UK hardback inventory risk for The Glass Orchard and its recommended option, as the seeded rows give them.
+const REPRINT_ARGUMENTS = {
+  signal_id: 'sig-20261102-title-001-inv-ed-001-hb-uk',
+  option_id: 'sig-20261102-title-001-inv-ed-001-hb-uk-expedite',
+  edition_id: 'ed-001-hb',
+  territory: 'UK',
+  quantity: 20000,
+  expedited: true,
+  investment_gbp: 50000,
+  rationale: 'The Glass Orchard sells at 3.1x its forecast and its UK hardback runs out before a standard reprint would land; the recommended expedited reprint protects £84,571.',
+  evidence: 'Signal sig-20261102-title-001-inv-ed-001-hb-uk, the UK hardback inventory risk; reprint and stock policy BKS-POL-001 §6; decision authority matrix BKS-GOV-003 §1.',
+}
+
+const OPTION_STEPS = [
+  "1. Fabric IQ ontology: asked for The Glass Orchard's DecisionOption rows; it returned the recommended expedited reprint for its UK hardback inventory risk.",
+  '2. Foundry IQ knowledge: asked what a reprint request records and who may approve an expedited reprint; it returned the reprint and stock policy and the decision authority matrix.',
+]
+
+// A question that asks to submit or raise a reprint request for The Glass Orchard.
+export function asksForReprint(question: string): boolean {
+  return /\b(?:submit|raise)\b/i.test(question) && /\breprint\b/i.test(question) && /\bglass orchard\b/i.test(question)
+}
+
+// The approval flow: the with-IQ agent reads the option, then holds the request for the user's approval (a fresh mcpr_
+// ID each time); the decision plays approved or rejected. The agent without tools submits nothing.
+export const MOCK_REPRINT: {
+  tools: Canned['tools']
+  approval: Omit<ApprovalRequest, 'id'>
+  approved: Canned
+  rejected: Canned
+  withoutIq: Canned
+} = {
+  tools: [
+    {
+      server: 'fabric_iq_ontology', tool: 'ask_ontology',
+      arguments: '{"question":"Which DecisionOption rows have the TitleName value \\"The Glass Orchard\\"? Return each OptionId, SignalId, EditionId, Territory, OptionName, IsRecommended, Units, InvestmentGbp, RevenueProtectedGbp and ArrivalDays."}',
+    },
+    {
+      server: 'foundry_iq_knowledge', tool: 'knowledge_base_retrieve',
+      arguments: '{"queries":["What must a reprint request record, and who may approve an expedited reprint?"]}',
+    },
+  ],
+  approval: { server: 'reprint_request', tool: 'submit_reprint_request', arguments: REPRINT_ARGUMENTS },
+  approved: {
+    tools: [{ server: 'reprint_request', tool: 'submit_reprint_request', arguments: JSON.stringify(REPRINT_ARGUMENTS) }],
+    answer: [
+      '**The expedited reprint of The Glass Orchard is approved and recorded as request rr-20261102-title-001-inv-ed-001-hb-uk.** [A1]',
+      '',
+      '- 20,000 UK hardbacks, expedited, for £50,000, arriving in 21 days and protecting £84,571 [D1]',
+      '- Approved by Mock user as publishing director [A1], the approver an expedited reprint up to £150,000 needs [F1 §1]',
+      '',
+      'Sources',
+      '- [A1] Reprint request · rr-20261102-title-001-inv-ed-001-hb-uk · Approved · Mock user (Publishing director) · 2026-11-18T10:15:00Z',
+      '- [D1] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite',
+      '- [F1] Decision authority matrix · §1 Approval limits',
+      '',
+      'Steps',
+      ...OPTION_STEPS,
+      '3. Reprint request: submitted the expedited reprint with your approval; it recorded request rr-20261102-title-001-inv-ed-001-hb-uk.',
+    ].join('\n'),
+  },
+  rejected: {
+    tools: [],
+    answer: [
+      '**Nothing was submitted: you rejected the expedited reprint request for The Glass Orchard.** [D1]',
+      '',
+      'Sources',
+      '- [D1] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite',
+      '',
+      'Steps',
+      ...OPTION_STEPS,
+      '3. Reprint request: proposed the expedited reprint for your approval; you rejected it, so it was not submitted.',
+    ].join('\n'),
+  },
+  withoutIq: {
+    tools: [],
+    answer: [
+      "**Nothing was submitted: this version of the assistant has no tools, so it can't raise a reprint request.**",
+      '',
+      'Sources',
+      '',
+      'Steps',
+      '1. Called no tool: this version has none.',
+    ].join('\n'),
+  },
+}
+
 function canned(question: string, variant: Variant): Canned {
   const key = question.trim().toLowerCase()
   const match = Object.keys(MOCK_ANSWERS).find((sample) => sample.toLowerCase() === key)
@@ -200,16 +288,9 @@ export function createMockClient(options: MockOptions = {}): AgentClient {
   const delayMs = options.delayMs ?? MOCK_DELAY_MS
   // The servers this mock user has "consented" to: a question that needs one asks for consent once.
   const consented = new Set<string>()
-  const send: Send = async (question, _cid, signal, onTool): Promise<TurnOutcome> => {
-    const reply = canned(question.text, question.variant)
-    const responseId = `resp_mock_${crypto.randomUUID().replaceAll('-', '')}`
-    if (reply.consent && !consented.has(reply.consent)) {
-      await pause(delayMs, signal)
-      consented.add(reply.consent)
-      return { status: 'needs-consent', consentUrl: MOCK_CONSENT_URL, server: reply.consent, responseId, toolCalls: [] }
-    }
+  const play = async (tools: Canned['tools'], signal: AbortSignal, onTool: (call: ToolCall) => void): Promise<ToolCall[]> => {
     const calls: ToolCall[] = []
-    for (const [index, tool] of reply.tools.entries()) {
+    for (const [index, tool] of tools.entries()) {
       const id = `mock_call_${index + 1}`
       const started = performance.now()
       onTool({ id, server: tool.server, tool: tool.tool, state: 'running' })
@@ -221,7 +302,26 @@ export function createMockClient(options: MockOptions = {}): AgentClient {
       onTool(done)
     }
     await pause(delayMs / 2, signal)
-    return { status: 'answered', text: reply.answer, responseId, toolCalls: calls }
+    return calls
+  }
+  const send: Send = async (question, _cid, signal, onTool): Promise<TurnOutcome> => {
+    const responseId = `resp_mock_${crypto.randomUUID().replaceAll('-', '')}`
+    if (question.approval) {
+      const reply = question.approval.approve ? MOCK_REPRINT.approved : MOCK_REPRINT.rejected
+      return { status: 'answered', text: reply.answer, responseId, toolCalls: await play(reply.tools, signal, onTool) }
+    }
+    if (asksForReprint(question.text) && question.variant === 'with_iq') {
+      const toolCalls = await play(MOCK_REPRINT.tools, signal, onTool)
+      const approval: ApprovalRequest = { id: `mcpr_mock_${crypto.randomUUID().replaceAll('-', '')}`, ...MOCK_REPRINT.approval }
+      return { status: 'needs-approval', approval, responseId, toolCalls }
+    }
+    const reply = asksForReprint(question.text) ? MOCK_REPRINT.withoutIq : canned(question.text, question.variant)
+    if (reply.consent && !consented.has(reply.consent)) {
+      await pause(delayMs, signal)
+      consented.add(reply.consent)
+      return { status: 'needs-consent', consentUrl: MOCK_CONSENT_URL, server: reply.consent, responseId, toolCalls: [] }
+    }
+    return { status: 'answered', text: reply.answer, responseId, toolCalls: await play(reply.tools, signal, onTool) }
   }
   return {
     mode: 'mock',

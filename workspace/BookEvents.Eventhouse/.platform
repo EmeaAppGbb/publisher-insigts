@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Eventhouse",
+    "displayName": "BookEvents",
+    "description": "Fictional book portfolio events: hosts the BookSignals KQL database of approved reprint requests and computed signal runs."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "2be4d554-4185-47ae-9d6d-2d79c49a2992"
+  }
+}

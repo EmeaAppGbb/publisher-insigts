@@ -22,7 +22,7 @@ From `app/`:
 
 | Command | Runs |
 | --- | --- |
-| `npm run dev:mock` | The page at `http://localhost:3000/` with canned answers for the sample questions: no sign-in, no Azure |
+| `npm run dev:mock` | The page at `http://localhost:3000/` with canned answers for the sample questions, and the approval flow for "Submit a reprint request for The Glass Orchard": no sign-in, no Azure |
 | `npm run dev` | The real server with Vite's middleware at `http://localhost:3000/`, against the deployment `.env.local` names |
 | `npm run build` | Type checks, then builds the page into `dist/` and bundles the server into one module, `dist-server/main.mjs` |
 | `npm start` | The built server on port 8080 |
@@ -60,11 +60,16 @@ An invalid or incomplete configuration stops the server at start.
 - `GET /healthz`: `ok`, untraced.
 - `GET /api/config`: `{ tenantId, clientId, scopes }`, the public sign-in settings.
 - `POST /api/turns`: `{ cid, variant, question, previousResponseId? }` with the user's bearer token: a lowercase
-  UUID, `with_iq` or `without_iq`, 1 to 2000 characters, and Foundry's response ID for a follow-up. Anything else is
-  a 400; a missing or invalid token is a 401 before anything else is read. The answer streams as newline-delimited
-  JSON: `{ "type": "tool", "call": … }` as each tool starts and finishes, `{ "type": "heartbeat" }` every 15
-  seconds, then `{ "type": "result", "outcome": … }`, which is `answered` (Markdown text), `needs-consent` (a link
-  to authorize Fabric IQ or Work IQ) or `failed`, each with Foundry's response ID when there is one.
+  UUID, `with_iq` or `without_iq`, 1 to 2000 characters, and Foundry's response ID for a follow-up. A decision on
+  an approval request is `{ cid, variant: "with_iq", approval: { id, approve }, previousResponseId }` instead: the
+  request's `mcpr_` ID, `true` or `false`, and the ID of the response that holds it. The server continues that
+  response with an `mcp_approval_response`; the browser never sends the tool's arguments, which Foundry keeps.
+  Anything else is a 400; a missing or invalid token is a 401 before anything else is read. The answer streams as
+  newline-delimited JSON: `{ "type": "tool", "call": … }` as each tool starts and finishes, `{ "type": "heartbeat" }`
+  every 15 seconds, then `{ "type": "result", "outcome": … }`, which is `answered` (Markdown text), `needs-consent`
+  (a link to authorize Fabric IQ, Work IQ or the reprint request), `needs-approval` (the one tool call the run holds
+  for the user's decision: its ID, server label, tool and plain arguments, refused unless all fit in 4 KB) or `failed`,
+  each with Foundry's response ID when there is one.
 - Everything else: the built page, with a strict content security policy. Only `/redirect.html` may be framed, by
   the app itself.
 

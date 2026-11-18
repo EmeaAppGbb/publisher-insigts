@@ -231,7 +231,7 @@ output "agent_settings" {
 }
 
 output "foundry_tool_connections" {
-  description = "The agents' MCP tool connections besides Fabric IQ, with the server URL each tool must name: the Foundry IQ knowledge base and, for public context, Web IQ's MCP server, each as the project identity (null until knowledge setup), and Work IQ's MCP server, as each user through OAuth identity passthrough (null unless work_iq_enabled)."
+  description = "The agents' MCP tool connections besides Fabric IQ, with the server URL each tool must name: the Foundry IQ knowledge base and, for public context, Web IQ's MCP server, each as the project identity (null until knowledge setup), Work IQ's MCP server (null unless work_iq_enabled) and the reprint request server, each as the signed-in user through OAuth identity passthrough."
   value = {
     knowledge_base = var.knowledge_lakehouse_id == null ? null : {
       name       = azapi_resource.knowledge_base_connection[0].name
@@ -245,6 +245,10 @@ output "foundry_tool_connections" {
       name       = azapi_resource.work_iq_connection[0].name
       server_url = local.work_iq_mcp_endpoint
     } : null
+    reprint_request = {
+      name       = azapi_resource.reprint_connection.name
+      server_url = local.reprint_mcp_endpoint
+    }
   }
 }
 
@@ -266,6 +270,30 @@ output "work_iq" {
       api_permissions_url         = "https://portal.azure.com/#@${data.azurerm_client_config.current.tenant_id}/view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${registration.client_id}/isMSAApp~/false"
     }
   ]...)
+}
+
+output "reprint_request" {
+  description = "The approval-gated reprint request server: its MCP endpoint, its container app's URL and image tag (null until deploy.py's reprint phase sets reprint_image_tag) and image repository; the API registration whose ReprintRequest.Submit scope and approval roles the server checks; the public OAuth client of the reprint-request connection, with Foundry's redirect URL and the scopes deploy.py grants it tenant-wide at api_permissions_url; and the server's identity, which deploy.py grants Database Viewer and Ingestor on the KQL database. Registration is not consent, and only the deployer holds an approval role."
+  value = {
+    mcp_endpoint                = local.reprint_mcp_endpoint
+    url                         = var.reprint_image_tag == null ? null : "https://${azurerm_container_app.reprint[0].ingress[0].fqdn}"
+    name                        = local.reprint_name
+    image_tag                   = var.reprint_image_tag
+    repository                  = local.reprint_image_name
+    tenant_id                   = data.azurerm_client_config.current.tenant_id
+    connection_name             = azapi_resource.reprint_connection.name
+    oauth_scopes                = local.reprint_oauth_scopes
+    oauth_redirect_url          = azapi_resource.reprint_connection.output.properties.redirectUrl
+    api_client_id               = azuread_application.reprint_api.client_id
+    api_service_principal_id    = azuread_service_principal.reprint_api.object_id
+    client_id                   = azuread_application.reprint_client.client_id
+    service_principal_object_id = azuread_service_principal.reprint_client.object_id
+    delegated_scopes            = [local.reprint_scope]
+    api_permissions_url         = "https://portal.azure.com/#@${data.azurerm_client_config.current.tenant_id}/view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/${azuread_application.reprint_client.client_id}/isMSAApp~/false"
+    approval_roles              = { for key, role in local.reprint_roles : key => role.value }
+    identity_client_id          = azurerm_user_assigned_identity.reprint.client_id
+    kql_database                = local.reprint_kql_database
+  }
 }
 
 output "container_registry" {

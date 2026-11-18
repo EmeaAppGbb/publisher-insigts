@@ -4,12 +4,14 @@ The stand-ins implement only what SeedBooks, ComputeBookSignals and PublishBooks
 they rely on: typed schemas that refuse a value of the wrong type as Spark does (an int for a DOUBLE, a datetime for
 a DATE), errorifexists and overwrite writes, Delta's insert-only merge on the key columns, reads of a table's current
 rows, and notebookutils.fs files that are never overwritten, need their folder to exist and read back as UTF-8.
+requests reaches an in-memory Eventhouse (see _kusto), the KQL database ComputeBookSignals reads and appends to.
 """
 
 import datetime
 import re
 import types
 
+from _kusto import Eventhouse
 from _support import LAKEHOUSE_ID, WORKSPACE_ID
 
 LAKEHOUSE_PATH = f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/{LAKEHOUSE_ID}"
@@ -211,19 +213,31 @@ class Spark:
         return Frame(self.lake, schema, rows)
 
 
-def modules(lake, workspace_name="books-dev", lakehouse_workspace=WORKSPACE_ID, lakehouse_name="Books"):
-    """notebookutils, pyspark.sql and delta.tables as the Books notebooks import them."""
+def modules(lake, workspace_name="books-dev", lakehouse_workspace=WORKSPACE_ID, lakehouse_name="Books",
+            eventhouse=None):
+    """notebookutils, requests, pyspark.sql and delta.tables as the Books notebooks import them.
+
+    requests reaches `eventhouse`, by default a new one whose BookSignals holds no reprint requests.
+    """
     spark = Spark(lake)
+    eventhouse = Eventhouse() if eventhouse is None else eventhouse
 
     def get(name, workspace):
         if (name, workspace) != (lakehouse_name, WORKSPACE_ID):
             raise LookupError(f"no lakehouse {name} in workspace {workspace}")
         return types.SimpleNamespace(id=LAKEHOUSE_ID, workspaceId=lakehouse_workspace, displayName=name)
 
+    def token(audience):
+        assert audience in ("pbi", "kusto"), audience
+        return f"{audience}-token"
+
     context = {"currentWorkspaceId": WORKSPACE_ID, "currentWorkspaceName": workspace_name}
     sql = types.SimpleNamespace(SparkSession=types.SimpleNamespace(builder=types.SimpleNamespace(getOrCreate=lambda: spark)))
     tables = types.SimpleNamespace(DeltaTable=DeltaTable)
+    requests = types.ModuleType("requests")
+    requests.request = eventhouse.request
     return {"notebookutils": types.SimpleNamespace(runtime=types.SimpleNamespace(context=context),
-                                                   lakehouse=types.SimpleNamespace(get=get), fs=lake),
-            "pyspark": types.SimpleNamespace(sql=sql), "pyspark.sql": sql,
+                                                   lakehouse=types.SimpleNamespace(get=get), fs=lake,
+                                                   credentials=types.SimpleNamespace(getToken=token)),
+            "requests": requests, "pyspark": types.SimpleNamespace(sql=sql), "pyspark.sql": sql,
             "delta": types.SimpleNamespace(tables=tables), "delta.tables": tables}

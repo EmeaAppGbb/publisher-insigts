@@ -56,8 +56,8 @@ test('a "Steps:" line inside the answer stays there when prose follows it', () =
   assert.deepEqual(parsed.sources.map((source) => source.id), ['F1'])
 })
 
-test('markers D, F, Web and W carry their IQ and section, listed once each in order; other markers are ignored', () => {
-  const parsed = parseReply('A [F1 §2] b [F1 §4] c [F1 §2] d [F1] e [Web1] f [W1] g [D1] h [D2] i [F1§5.1] [L1] [C1] [U1] [X1] [W] [W1x] [F1, §2] [w1] [Web]')
+test('markers D, F, Web, W and A carry their kind and section, listed once each in order; other markers are ignored', () => {
+  const parsed = parseReply('A [F1 §2] b [F1 §4] c [F1 §2] d [F1] e [Web1] f [W1] g [D1] h [D2] i [F1§5.1] [A1] [A1] [L1] [C1] [U1] [X1] [W] [W1x] [F1, §2] [w1] [Web] [a1] [A]')
   assert.deepEqual(parsed.markers, [
     { id: 'F1', kind: 'foundry', section: '2' },
     { id: 'F1', kind: 'foundry', section: '4' },
@@ -67,13 +67,14 @@ test('markers D, F, Web and W carry their IQ and section, listed once each in or
     { id: 'D1', kind: 'fabric' },
     { id: 'D2', kind: 'fabric' },
     { id: 'F1', kind: 'foundry', section: '5.1' },
+    { id: 'A1', kind: 'action' },
   ])
   assert.match('[Web12 §4.1]', MARKER)
   for (const ignored of ['[L1]', '[C1]', '[U1 §3]', '[X1]']) assert.doesNotMatch(ignored, MARKER)
 })
 
-test('the IQs used come from the answer and its sources, always ordered fabric, foundry, work, web', () => {
-  assert.deepEqual(parseReply('[Web1] [D1] [F1] [W2]').usedIqs, ['fabric', 'foundry', 'work', 'web'])
+test('the IQs used come from the answer and its sources, always ordered fabric, foundry, work, web, then the action', () => {
+  assert.deepEqual(parseReply('[A1] [Web1] [D1] [F1] [W2]').usedIqs, ['fabric', 'foundry', 'work', 'web', 'action'])
   assert.deepEqual(parseReply('Answer [L1].\n\nSources\n- [Web1] Page · example.com\n- [D1] ScenarioOntology · Site · demo-site-001\n- [L1] Lesson').usedIqs, ['fabric', 'web'])
   assert.deepEqual(parseReply('Answer [C1] [U1 §3.2].').usedIqs, [])
   assert.deepEqual(parseReply('Answer.\n\nSteps\n1. Searched mail [W1].').usedIqs, [], 'steps are not sources')
@@ -105,6 +106,28 @@ test('source lines keep plain text and an http(s) URL; lines without a known mar
     { id: 'F2', kind: 'foundry', text: 'Maintenance procedure · §2' },
     { id: 'D2', kind: 'fabric', text: 'Site demo-site-001' },
   ])
+})
+
+test('the reprint request the tool recorded is an action source, cited by [A1] like any other', () => {
+  const request = 'Reprint request · rr-20261102-title-001-inv-ed-001-hb-uk · Approved · Mock user (Publishing director) · 2026-11-18T10:15:00Z'
+  const parsed = parseReply([
+    '**The expedited reprint is approved and recorded.** [A1] It protects £84,571 [D1].',
+    '',
+    'Sources',
+    `- [A1] ${request}`,
+    '- [D1] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite',
+    `- **A1**: ${request}`,
+    '',
+    'Steps',
+    '1. Reprint request: submitted the expedited reprint with your approval; it recorded the request [A1].',
+  ].join('\n'))
+  assert.deepEqual(parsed.markers, [{ id: 'A1', kind: 'action' }, { id: 'D1', kind: 'fabric' }])
+  assert.deepEqual(parsed.sources, [
+    { id: 'A1', kind: 'action', text: request },
+    { id: 'D1', kind: 'fabric', text: 'BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite' },
+  ])
+  assert.deepEqual(parsed.usedIqs, ['fabric', 'action'])
+  assert.deepEqual(parsed.steps, ['Reprint request: submitted the expedited reprint with your approval; it recorded the request [A1].'])
 })
 
 test("Foundry's own retrieval citations are dropped, and the reply's markers and sources stay", () => {

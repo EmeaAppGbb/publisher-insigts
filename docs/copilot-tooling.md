@@ -21,7 +21,8 @@ Azure, Work IQ and Fabric repository commit pins and Azure MCP version. Local
 marketplace checkouts use explicit Git commit fetches: a Copilot marketplace
 `#ref` shortcut does not reliably accept an immutable commit. The prompt agents
 and web app need no Copilot package: the runner publishes the agents through
-Foundry's REST API and builds the app's image with Azure CLI.
+Foundry's REST API and builds the app's and the reprint request server's images
+with Azure CLI.
 
 Azure MCP is installed at a reviewed version as `azmcp`. The image's small,
 checked overlay points the Azure server and its telemetry launchers at that

@@ -4,12 +4,14 @@ version: 2
 # deliberately, not here; see AGENTS.md and the template-maintenance skill.
 updates:
   - package-ecosystem: npm
-    directory: /app
+    directories:
+      - /app
+      - /scenario/workflows/reprint-request
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     ignore:
-      # Keep Node's type definitions on the runtime's release line (Node 24 in app/Dockerfile).
+      # Keep Node's type definitions on the runtime's release line (Node 24 in both Dockerfiles).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
@@ -26,6 +28,7 @@ updates:
   - package-ecosystem: docker
     directories:
       - /app
+      - /scenario/workflows/reprint-request
     schedule:
       interval: weekly
     ignore:

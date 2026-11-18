@@ -450,3 +450,26 @@ variable "app_local_redirect_uris" {
     error_message = "app_local_redirect_uris accepts only http://localhost[:port]/redirect.html, the app's MSAL redirect bridge; the deployed app's URL is always registered."
   }
 }
+
+variable "reprint_image_tag" {
+  description = "Tag of the reprint request server image in the registry: a digest of the reviewed scenario/workflows/reprint-request files it was built from. Leave null: deploy.py's reprint phase builds the image with ACR Tasks, sets this tag and applies a reviewed plan that creates or updates the server's container app."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.reprint_image_tag == null ? true : can(regex("^[0-9a-f]{12}$", var.reprint_image_tag))
+    error_message = "reprint_image_tag must be null or the 12-character tag deploy.py builds."
+  }
+}
+
+variable "reprint_min_replicas" {
+  description = "Warm replicas of the reprint request server (0 or 1; it never runs more than one). 1 keeps an approved call from waiting for a cold start; 0 stops paying for idle time between sessions."
+  type        = number
+  default     = 1
+  nullable    = false
+
+  validation {
+    condition     = contains([0, 1], var.reprint_min_replicas)
+    error_message = "reprint_min_replicas must be 0 or 1."
+  }
+}

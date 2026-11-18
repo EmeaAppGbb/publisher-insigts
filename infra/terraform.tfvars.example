@@ -15,6 +15,10 @@ knowledge_ontologies   = {}
 # Leave it null until then; the container app exists only once it is set.
 app_image_tag = null
 
+# deploy.py's reprint phase sets this to the tag of the reprint request server image it built: a digest of
+# scenario/workflows/reprint-request's committed files. Leave it null until then.
+reprint_image_tag = null
+
 # Web IQ is deployed with every platform. Set true only after accepting its terms.
 # Read preparation.md: paid subscription, public global service,
 # preview terms and manual portal onboarding. The with-IQ agent's Web IQ tool
@@ -40,6 +44,7 @@ work_iq_enabled = false
 # For lower cost, set app = { min_replicas = 0 } between sessions (the first question then
 # waits for a cold start), keep a smaller Fabric capacity and pause it when idle.
 # agent_model            = { capacity = 100 }
+# reprint_min_replicas   = 0 # the reprint request server's first call then waits for a cold start
 # agent_reasoning_effort = "low"
 # chat_model             = { capacity = 50 }
 # app                    = { min_replicas = 1 }

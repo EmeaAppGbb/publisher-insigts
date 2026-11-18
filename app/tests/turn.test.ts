@@ -72,6 +72,25 @@ test('a consent request becomes a link to authorize the tool, then ask again; on
   assert.equal(unsafe.status, 'failed')
 })
 
+test('a held call becomes needs-approval with the response its decision continues; the decision is sent and logged as one', async () => {
+  const approval = { id: 'mcpr_1', server: 'reprint_request', tool: 'submit_reprint_request', arguments: { territory: 'UK', quantity: 20000, expedited: true } }
+  const outcome: TurnOutcome = { status: 'needs-approval', approval, responseId: 'resp_4', toolCalls: [ontology] }
+  const records: TurnLog[] = []
+  const log = (record: TurnLog) => { records.push(record) }
+  assert.deepEqual(await runTurn(options(async () => outcome, { log })), { status: 'needs-approval', approval, elapsedMs: 250, responseId: 'resp_4', toolCalls: [ontology] })
+  const decision: Question = { variant: 'with_iq', approval: { id: 'mcpr_1', approve: false }, previousResponseId: 'resp_4' }
+  const sent: Question[] = []
+  await runTurn(options(async (question) => {
+    sent.push(question)
+    return { status: 'answered', text: 'Nothing was submitted.', toolCalls: [] }
+  }, { log, question: decision }))
+  assert.deepEqual(sent, [decision])
+  assert.deepEqual(records.map((record) => [record.followUp, record.decision, record.outcome]), [[false, undefined, 'needs-approval'], [true, 'reject', 'answered']])
+  assert.ok(!JSON.stringify(records).includes('mcpr_1'))
+  const unreadable = await runTurn(options(async () => ({ ...outcome, approval: { ...approval, arguments: { territory: { code: 'UK' } } } }) as unknown as TurnOutcome))
+  assert.equal(unreadable.status, 'failed', 'a call the card cannot show in full is never offered')
+})
+
 test('failures, empty answers and exceptions become failed results', async () => {
   assert.deepEqual(await runTurn(options(async () => ({ status: 'failed', message: 'Foundry answered HTTP 503. Ask again.', code: 'HTTP 503', toolCalls: [] }))), {
     status: 'failed', message: 'Foundry answered HTTP 503. Ask again.', code: 'HTTP 503', elapsedMs: 250, toolCalls: [],

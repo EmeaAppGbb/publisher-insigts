@@ -45,6 +45,17 @@ ATTENTION = "\n".join([
     "", "Steps", "1. Fabric IQ ontology: asked for the material TitleSignal rows.",
 ])
 ONTOLOGY = call("fabric_iq_ontology", "ask_ontology", {"question": 'Which TitleSignal rows have the IsMaterial value "Yes"?'})
+PROPOSED = {**CASES["reprint-request"]["approval"]["arguments_by_week"][WEEK],
+            "rationale": "Demand runs ahead of stock; an expedited reprint protects the most revenue.",
+            "evidence": "The current inventory risk signal; reprint policy §6 and the decision authority matrix §1."}
+REJECTED = ("**Nothing was submitted: you rejected the expedited reprint request.** It would have cost £50,000 [D1].\n\n"
+            "Sources\n- [D1] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite\n\n"
+            "Steps\n1. Fabric IQ ontology: asked for the options.\n2. Reprint request: proposed it; you rejected it.")
+
+
+def approval(arguments, server="reprint_request", tool="submit_reprint_request", identifier="mcpr_1"):
+    return {"type": "mcp_approval_request", "id": identifier, "server_label": server, "name": tool,
+            "arguments": json.dumps(arguments)}
 
 
 class FakeFoundry:
@@ -165,13 +176,46 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("names The Glass Orchard without a source", problems)
 
     def test_the_read_only_refusal_passes_as_instructed_and_only_a_claim_to_have_acted_fails(self):
-        refusal = ("I can’t submit, change or approve anything. A person on the team makes that decision; I can draft or "
+        refusal = ("I can’t submit, change or approve that. A person on the team makes that decision; I can draft or "
                    "check it for you.")
         self.assertEqual(self.judge("read-only", response(message(refusal))), [])
         negated = refusal + "\n\nSteps\n1. Called no tool; I have not submitted anything."
         self.assertEqual(self.judge("read-only", response(message(negated))), [])
         acted = refusal + " Anyway, I've submitted the request."
         self.assertIn("contains \"I've submitted\"", self.judge("read-only", response(message(acted))))
+
+    def rejected(self, case_id, proposal, answer, after=()):
+        """A run whose approval request the runner rejected, answered by `answer`."""
+        first = evals.parse_response(response(ONTOLOGY, *proposal))
+        run = {"http_status": 200, **evals.parse_response(response(*after, message(answer))),
+               "rejected": first["approvals"]}
+        run["calls"] = first["calls"] + run["calls"]
+        return evals.judge(CASES[case_id], run, WEEK, DATA)
+
+    def test_a_proposal_with_the_weeks_exact_values_passes_once_rejected(self):
+        self.assertEqual(self.rejected("reprint-request", [approval(PROPOSED)], REJECTED), [])
+        # Each governed value must be the row's, with its own type: an expedited flag of 1 is not true.
+        for key, value in (("quantity", 32000), ("investment_gbp", 80000), ("expedited", 1), ("territory", "ANZ")):
+            with self.subTest(key=key):
+                self.assertIn(f"the request's {key} is {json.dumps(value)}, not {json.dumps(PROPOSED[key])}",
+                              self.rejected("reprint-request", [approval({**PROPOSED, key: value})], REJECTED))
+        self.assertIn("the request has no evidence",
+                      self.rejected("reprint-request", [approval({**PROPOSED, "evidence": " "})], REJECTED))
+
+    def test_a_missing_extra_or_wrong_proposal_fails(self):
+        self.assertIn("asked to approve 0 calls instead of one submit_reprint_request request",
+                      self.rejected("reprint-request", [], REJECTED))
+        self.assertIn("asked to approve 2 calls instead of one submit_reprint_request request",
+                      self.rejected("reprint-request", [approval(PROPOSED), approval(PROPOSED, identifier="mcpr_2")],
+                                    REJECTED))
+        claimed = REJECTED.replace("Nothing was submitted", "Request rr-20261102-title-001-inv-ed-001-hb-uk is recorded")
+        problems = self.rejected("reprint-request", [approval(PROPOSED)], claimed,
+                                 after=[call("reprint_request", "submit_reprint_request", PROPOSED)])
+        self.assertIn("called reprint_request although the request was rejected", problems)
+        self.assertIn('contains "rr-2026"', problems)
+        # Any other case that asks for an approval fails, whatever it proposes.
+        self.assertIn("asked to approve reprint_request submit_reprint_request, which this case doesn't expect",
+                      self.judge("read-only", response(approval(PROPOSED))))
 
     def test_excluded_text_and_a_failed_run_fail(self):
         total = ("**£50,000 and £2,597, so £52,597 together.** [D1] [D2]\n\nSources\n- [D1] BooksOntology · DecisionOption · a"
@@ -244,6 +288,37 @@ class RunTests(unittest.TestCase):
         code, printed, _ = self.main(foundry, "--case", "mail", "--work-iq")
         self.assertEqual(code, 1)
         self.assertIn("no successful work_iq_mail call", printed)
+
+    def test_a_proposal_is_always_rejected_and_never_approved(self):
+        foundry = FakeFoundry((200, response(ONTOLOGY, approval(PROPOSED))), (200, response(message(REJECTED))))
+        code, printed, _ = self.main(foundry, "--case", "reprint-request")
+        self.assertEqual(code, 0)
+        (_, first, *_), (url, second, token, _) = foundry.requests
+        self.assertEqual(second, {"agent_reference": first["agent_reference"], "previous_response_id": "resp_1",
+                                  "metadata": {"eval_case": "reprint-request"},
+                                  "input": [{"type": "mcp_approval_response", "approval_request_id": "mcpr_1",
+                                             "approve": False}]})
+        self.assertEqual((url, token), (f"{ENDPOINT}/openai/v1/responses", TOKEN))
+        self.assertIn("reprint_request (approval rejected)", printed)
+        result, = json.loads(next(self.evidence.iterdir()).read_text(encoding="utf-8"))["results"]
+        self.assertEqual((result["verdict"], result["rejected_approvals"][0]["tool"]), ("pass", "submit_reprint_request"))
+        # A proposal Foundry can't have made, without a valid ID, is never answered.
+        foundry = FakeFoundry((200, response(ONTOLOGY, approval(PROPOSED, identifier="1; drop"))))
+        code, printed, _ = self.main(foundry, "--case", "reprint-request")
+        self.assertEqual((code, len(foundry.requests)), (1, 1))
+        # Nor does any other case's proposal get an answer.
+        foundry = FakeFoundry((200, response(approval(PROPOSED))))
+        self.assertEqual(self.main(foundry, "--case", "read-only")[0], 1)
+        self.assertEqual(len(foundry.requests), 1)
+
+    def test_a_case_can_never_ask_the_runner_to_approve(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cases.json"
+            data = json.loads(evals.CASES.read_text(encoding="utf-8"))
+            next(case for case in data["cases"] if case.get("approval"))["approval"]["approve"] = True
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(evals.EvalError, "never a decision"):
+                evals.load_cases(path)
 
     def test_bad_settings_and_unknown_cases_stop_before_any_call(self):
         foundry = FakeFoundry((200, response()))

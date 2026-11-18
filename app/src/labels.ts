@@ -1,6 +1,7 @@
-// The UI's words for variants, choices, tool states and durations, and what each turn announces to screen readers.
+// The UI's words for variants, choices, tool states, durations and approval requests, and what each turn announces to
+// screen readers.
 import type { Turn } from './exchanges.ts'
-import { IQ_NAMES, iqOf } from './live/protocol.ts'
+import { IQ_NAMES, iqOf, type ApprovalRequest, type ApprovalValue } from './live/protocol.ts'
 import { CANCELLED } from './live/turn.ts'
 import type { IqKey, ToolCall, Variant } from './live/types.ts'
 
@@ -31,6 +32,7 @@ export const LEGEND: readonly { marker: string; iq: IqKey; what: string }[] = [
   { marker: 'F', iq: 'foundry', what: 'approved documents' },
   { marker: 'Web', iq: 'web', what: 'public context' },
   { marker: 'W', iq: 'work', what: 'your mail' },
+  { marker: 'A', iq: 'action', what: 'submitted on approval' },
 ]
 
 export const STATE_LABELS: Readonly<Record<ToolCall['state'], string>> = { running: 'Running', completed: 'Done', failed: 'Failed' }
@@ -43,6 +45,71 @@ export function iqName(server: string | undefined): string | undefined {
 export function duration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`
+}
+
+export interface ApprovalCopy {
+  title: string
+  // What approving does, and that nothing happens before it.
+  effect: string
+  approved: string
+  rejected: string
+  // For the turn's live region.
+  waiting: string
+}
+
+// The approval card's words: a reprint request submits to production planning as the user; any other tool, should an
+// agent hold one for approval, runs as them.
+export function approvalCopy(approval: ApprovalRequest): ApprovalCopy {
+  if (iqOf(approval.server) === 'action') {
+    return {
+      title: 'Approve this reprint request?',
+      effect: 'Approving submits the request to production planning as you. Nothing is submitted until you approve.',
+      approved: 'You approved this request.',
+      rejected: 'You rejected this request. Nothing was submitted.',
+      waiting: 'a reprint request needs your approval.',
+    }
+  }
+  return {
+    title: `Approve this ${approval.tool} call?`,
+    effect: `Approving lets the agent run ${approval.tool} as you. Nothing runs until you approve.`,
+    approved: 'You approved this call.',
+    rejected: 'You rejected this call. Nothing ran.',
+    waiting: `${approval.tool} needs your approval.`,
+  }
+}
+
+const COUNT = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 })
+const POUNDS = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
+// A reprint request's arguments, in the order a person checks them.
+const APPROVAL_FIELDS: readonly { name: string; label: string; money?: boolean }[] = [
+  { name: 'edition_id', label: 'Edition' },
+  { name: 'territory', label: 'Territory' },
+  { name: 'quantity', label: 'Quantity' },
+  { name: 'expedited', label: 'Expedited' },
+  { name: 'investment_gbp', label: 'Investment', money: true },
+  { name: 'signal_id', label: 'Signal' },
+  { name: 'option_id', label: 'Option' },
+  { name: 'rationale', label: 'Rationale' },
+  { name: 'evidence', label: 'Evidence' },
+]
+
+function shown(value: ApprovalValue, money = false): string {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'number') return (money ? POUNDS : COUNT).format(value)
+  return value ?? 'None'
+}
+
+// Every argument the agent proposed, labelled and formatted: the reprint request's fields first, then any other, so
+// the card hides nothing the user approves.
+export function approvalFields(approval: ApprovalRequest): { name: string; label: string; value: string }[] {
+  const known = new Set(APPROVAL_FIELDS.map((field) => field.name))
+  const fields = APPROVAL_FIELDS.filter((field) => Object.hasOwn(approval.arguments, field.name))
+    .map((field) => ({ name: field.name, label: field.label, value: shown(approval.arguments[field.name], field.money) }))
+  const others = Object.entries(approval.arguments).filter(([name]) => !known.has(name)).map(([name, value]) => ({
+    name, label: name.replaceAll('_', ' ').replace(/^\w/, (first) => first.toUpperCase()), value: shown(value),
+  }))
+  return [...fields, ...others]
 }
 
 // A short, polite update for the turn's live region: each tool event, then the outcome.
@@ -59,6 +126,8 @@ export function announcement(turn: Turn, label: string): string {
       return `${label}: answer ready.`
     case 'needs-consent':
       return `${label}: ${iqName(result.server) ?? 'a tool'} needs your consent.`
+    case 'needs-approval':
+      return `${label}: ${approvalCopy(result.approval).waiting}`
     case 'failed':
       return result.code === CANCELLED ? `${label}: stopped.` : `${label}: ${result.message}`
   }

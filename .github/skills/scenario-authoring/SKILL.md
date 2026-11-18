@@ -41,16 +41,27 @@ do not turn the binder into unrestricted text substitution.
 5. Adapt the shared `instructions.md`, byte for byte in every variant, within
    8,000 characters, without braces or document content, and the tool
    descriptions in `agents/scenario-with-iq/tools/`. Keep each tool's server label,
-   connection placeholder, read-only `allowed_tools` and `require_approval: never`.
+   its `server_url` and `project_connection_id` placeholders (each exactly one
+   placeholder, never a deployment's URL or connection name), read-only
+   `allowed_tools` and `require_approval: never`. The one exception is the
+   approval-gated reprint request: only `tools/ReprintRequest.json` may name its
+   server, with exactly the `reprint_request` label,
+   `{{reprint_request_mcp_endpoint}}`, `{{reprint_request_connection}}`,
+   `allowed_tools: ["submit_reprint_request"]` and `require_approval: "always"`.
+   `foundry_agent.py validate` refuses any other tool that names that label or
+   either placeholder, whatever it asks for. Never add another write tool or widen
+   this one. Keep its workflow logic in `scenario/workflows/`.
    Change the reply format only together with `app/src/live/reply.ts`, its tests
    and the mock answers. Update the app's sample questions and the runner's
    `SCENARIO` readiness questions and facts with the seed data. To show what one IQ
    adds, add a `scenario-no-<iq>` variant as `agents/README.md` describes. Add
-   scenario views in `app/src/` on the shell's sign-in, tool timeline and failure
-   states; preserve source authority and per-user isolation, and keep the server
+   scenario views in `app/src/` on the shell's sign-in, tool timeline, approval card
+   and failure states; preserve source authority and per-user isolation, and keep the server
    limited to the configured project and agents.
 6. Put independent expected outcomes and negative/source/authorization cases
-   in `scenario/evals/`. A static fixture is not a live model/retrieval proof.
+   in `scenario/evals/`. A static fixture is not a live model/retrieval proof. A
+   case may expect an approval request, which the eval runner always rejects;
+   never make an eval or readiness check approve one.
 
 Review the whole dependency graph, not only YAML syntax. Additional graph,
 semantic-model and data-agent consumers need their own explicit binding,
@@ -71,7 +82,8 @@ widen roles or recreate a partially deployed agent or app to get a plausible
 answer.
 
 Run `python3 .github/skills/deploy-platform/scripts/foundry_agent.py validate` and the
-deploy-platform and app tests after changing agents or the app. Use product skills
+deploy-platform and app tests after changing agents or the app, and the reprint
+request server's lint, type check and tests after changing it. Use product skills
 from `docs/copilot-tooling.md` for opted-in capabilities, but retain repository
 ownership/approval rules. Unsupported capabilities stop for
 a design decision rather than becoming scenario-specific improvisation.

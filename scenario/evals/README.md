@@ -8,7 +8,7 @@ A run is judged on its structure, not its wording:
 
 - **Tools.** The tools a case requires ran and returned without an error; the without-IQ agent called none.
 - **Sources.** The answer carries the expected source markers (`[D1]` ontology data, `[F1]` an approved document,
-  `[Web1]` public context, `[W1]` mail), and each marker has a line under *Sources*: an ontology question one line
+  `[Web1]` public context, `[W1]` mail, `[A1]` a recorded reprint request), and each marker has a line under *Sources*: an ontology question one line
   for each row it cites, a document, page or message exactly one. The *Sources* cite the rows a case needs, such
   as each material signal by its key. A *Steps* list follows.
 - **Facts.** The answer contains the case's expected names and figures for the as-of week, and none of its excluded
@@ -18,6 +18,9 @@ A run is judged on its structure, not its wording:
 - **Public terms only.** No Web IQ query names a title, author, imprint or printer from the internal portfolio, even
   by a part that still identifies it, such as an author's surname or a printer's short name, and every Web IQ call
   asks for passage content.
+- **Approvals.** Only a case that expects one may ask the user to approve a tool call: exactly one request to the
+  expected tool, with the week's governed values. The runner always rejects it, so no eval records a request, and
+  judges the agent's answer after the rejection.
 
 ## Cases
 
@@ -35,12 +38,14 @@ A run is judged on its structure, not its wording:
 | `cases[].steps` | `false` for a reply that the instructions limit to one fixed sentence, which has no *Steps*. |
 | `cases[].includes`, `includes_by_week`, `excludes`, `excludes_by_week`, `answer_includes` | Text that must or must not appear, compared without case, apostrophe style or thousands separators; a list inside `includes` is satisfied by any one entry. `answer_includes` must appear in the answer itself, before *Sources*, such as the public-context label. |
 | `cases[].requires` | `work_iq` for a case that needs the opt-in mail tool. |
+| `cases[].approval` | The one approval request a case expects: its `server`, `tool` and, in `arguments_by_week`, the values each argument must equal for each week, such as the expedited option's `quantity` and `investment_gbp`. It names no decision: the runner only ever rejects. |
 
 The cases cover each [app sample question](../../app/src/samples.ts) and these negative cases: the without-IQ agent
 names no title and states no figure, the agent never totals two options' investments, a gap in the documents is
-stated rather than filled, and an instruction to act gets only the read-only refusal. The approval-gated reprint request (approve and
-reject), a second user's denied access and cross-user isolation join when the reprint server and the two-user proof
-do.
+stated rather than filled, and an instruction to make any other change, such as a stock transfer, gets only the fixed
+refusal. The approval-gated reprint request is proposed with the week's exact values and rejected; approving it is the
+demo's own act, never an eval's, because DEV cannot take an approval back. A second user's denied approval, denied
+access and cross-user isolation join with the two-user proof.
 
 `python3 -B -m unittest discover -s .github/skills/fabric-workspace/tests` recomputes every week's amounts and the
 private terms from `SeedBooks`, `ComputeBookSignals` and the approved documents, ties each expected fact to the row or
@@ -61,12 +66,14 @@ The runner reads the project endpoint and the agents' names from `terraform outp
 case's agent through the Responses API with your own Microsoft Foundry token, as the app does. It never prints or
 stores the token. Each with-IQ case takes up to a minute. Add `--work-iq` when Work IQ is enabled.
 
-Your first Fabric IQ question needs your consent: the runner stops with exit code 3 and the consent link. Open it
-in a browser as the same user, accept, and run the evals again. It exits 1 when a case fails and 0 when all pass.
+Your first Fabric IQ question, and your first with-IQ question after the reprint server is deployed, need your
+consent: the runner stops with exit code 3 and the consent link. Open it in a browser as the same user, accept, and
+run the evals again. It exits 1 when a case fails and 0 when all pass.
 
 A note doesn't fail a case: for example, Foundry's own `【6:1†source】` citations beside the right marker, which the
 app's parser drops. Evidence goes to `.artifacts/evals/`, owner-only and ignored by Git: each case's question,
-verdict, problems and notes, the response ID, the tool calls with their arguments and errors, and the answer. Read a failure there, or in the
+verdict, problems and notes, the response ID, the tool calls with their arguments and errors, any rejected approval
+request with its arguments, and the answer. Read a failure there, or in the
 [app's tool timeline](../../docs/runtime-integration.md#troubleshooting), before changing an agent.
 
 A pass is evidence for one user's agent route in one run. It doesn't prove the app's sign-in or registration,

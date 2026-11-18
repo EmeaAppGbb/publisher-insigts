@@ -1,5 +1,6 @@
 /* The scenario assistant's one stylesheet: a quiet, monochrome tool surface in which the four IQ colours are the only
-   saturated accents, so a marker's colour always means its source. Light and dark follow the system setting. */
+   saturated accents, so a marker's colour always means its source. The agent's one action, the reprint request, is
+   a neutral outlined chip. Light and dark follow the system setting. */
 
 :root {
   color-scheme: light dark;
@@ -24,6 +25,9 @@
   --web-soft: #fff1d9;
   --work: #315bc7;
   --work-soft: #e9efff;
+  --action: #3b4656;
+  --action-soft: #f1f3f6;
+  --action-line: #8d97a6;
 
   --ok: #1d6b40;
   --ok-soft: #e6f4ec;
@@ -62,6 +66,9 @@
     --web-soft: #433c2e;
     --work: #9bbaff;
     --work-soft: #203759;
+    --action: #d5dbe3;
+    --action-soft: #232931;
+    --action-line: #6b7686;
 
     --ok: #7fd8a4;
     --ok-soft: #173326;
@@ -522,6 +529,7 @@ button.cite:hover {
 .cite-foundry { background: var(--foundry-soft); color: var(--foundry); }
 .cite-web { background: var(--web-soft); color: var(--web); }
 .cite-work { background: var(--work-soft); color: var(--work); }
+.cite-action { background: var(--action-soft); color: var(--action); border-color: var(--action-line); }
 
 /* Answers */
 
@@ -593,7 +601,8 @@ button.cite:hover {
 }
 
 .state-answered { background: var(--ok-soft); color: var(--ok); }
-.state-needs-consent { background: var(--attention-soft); color: var(--attention); }
+.state-needs-consent,
+.state-needs-approval { background: var(--attention-soft); color: var(--attention); }
 .state-failed { background: var(--danger-soft); color: var(--danger); }
 
 .turn {
@@ -665,6 +674,8 @@ button.cite:hover {
 .iq-foundry { background: var(--foundry-soft); color: var(--foundry); }
 .iq-web { background: var(--web-soft); color: var(--web); }
 .iq-work { background: var(--work-soft); color: var(--work); }
+/* An inset outline, so the badge keeps the others' size. */
+.iq-action { background: var(--action-soft); color: var(--action); box-shadow: inset 0 0 0 1px var(--action-line); }
 
 .tool-name {
   overflow: hidden;
@@ -877,9 +888,47 @@ summary .count {
   margin-top: 10px;
 }
 
-.notice.consent {
+.notice.consent,
+.notice.approval {
   border-color: var(--attention-line);
   background: var(--attention-soft);
+}
+
+.approval-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 10px 0;
+  font-size: 0.875rem;
+}
+
+.approval-fields div {
+  display: contents;
+}
+
+.approval-fields dt {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.approval-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.notice .approval-note {
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+.approval-note:focus {
+  outline: none;
+}
+
+.approval-note:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .notice.error {
@@ -972,6 +1021,15 @@ summary .count {
 
   .tool-state {
     grid-column: 2 / -1;
+  }
+
+  .approval-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .approval-fields dd + dt {
+    margin-top: 6px;
   }
 }
 

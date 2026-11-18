@@ -23,6 +23,7 @@ Read `AGENTS.md` and inspect the current diff before editing. Preserve unrelated
 | Guided deployment | The `deploy-platform` skill, its runner (`scripts/deploy.py`), its native-request reference and `cicd/README.md` |
 | Prompt agents or their publication | `agents/` and its README, `scripts/foundry_agent.py`, the agent outputs in `infra/app.tf` and `infra/outputs.tf`, the runner's `agent` phase, `docs/runtime-integration.md` |
 | Web app or its hosting | `app/` (page, `src/live/`, `server/`, `Dockerfile`) and its README, `infra/app.tf`, the runner's `app` phase, `docs/runtime-integration.md` |
+| The approval-gated reprint request | `scenario/workflows/reprint-request/` and its README, `infra/reprint.tf`, `agents/scenario-with-iq/tools/ReprintRequest.json`, `workspace/BookSignals.KQLDatabase/`, the runner's `reprint` phase, `docs/runtime-integration.md#reprint-request` |
 
 Preserve the non-obvious infrastructure constraints:
 
@@ -37,6 +38,7 @@ Preserve the non-obvious infrastructure constraints:
 - Look up Git-owned items rather than creating duplicate lakehouses/notebooks in Terraform. Keep DEV-only Search permissions and conditional knowledge resources when the lakehouse ID is null.
 - Keep deployment-pipeline replacement semantics visible when changing stages. Do not hide drift or paper over unsupported provider behavior.
 - Keep the app's hosting, its container app (created once `app_image_tag` is set) and every project connection in Terraform, and the agent versions and the image build in the runner. Keep the registry's admin user disabled; the app identity gets only `AcrPull` and Monitoring Metrics Publisher. Keep the sign-in registration a secretless single-page client whose only API permission is the delegated `https://ai.azure.com/user_impersonation` scope and whose redirect URIs are only `/redirect.html` bridges. Keep Application Insights Entra-only, `AppGenAIContent` protected with Privileged Monitoring Data Reader for the deployer only, and the destroy-time Smart Detection cleanup. Match observed service behavior so plans stay clean: Foundry stores project connections with `isSharedToAll = false`; azurerm 5.x accepts the Container Apps environment's workspace only with `logs_destination = "log-analytics"`; and the service gives every Container Apps environment a `Consumption` workload profile, which Terraform declares and the container app targets.
+- Keep the reprint request the only tool that changes anything: exactly `tools/ReprintRequest.json` names its server, allowing only `submit_reprint_request` with `require_approval: always`. Keep its registrations, `reprint-request` connection, identity and container app (created once `reprint_image_tag` is set, one replica at most, probes on `/healthz` only) in Terraform, and its KQL database roles and image build in the runner. Keep the connection's OAuth client a public client without a secret, the API's four approval roles with only the deployer assigned, and the server's identity at `AcrPull` plus Database Viewer and Ingestor on `BookSignals`, never a workspace role. Keep `BookEvents` and `BookSignals` data items that `--update-definitions` never replaces.
 
 ## Run static checks only
 
@@ -62,7 +64,8 @@ commands and HTTP:
 Check template refusal, target/tenant mismatches, provider credential overrides,
 the Foundry scope and regional resource-type checks, the Node, Git and Azure CLI
 minimums, Fabric quota parsing (including a resize), the Work IQ prerequisite list
-and credential-output redaction, and the eval runner's judging, consent stop and token-free
+and credential-output redaction, and the eval runner's judging, consent stop,
+rejection of a case's expected approval request (it never approves) and token-free
 evidence. Do not run
 the helpers' live probes or evals as a template-maintenance check; those require a chosen
 derived checkout and explicit permission.
@@ -76,10 +79,14 @@ PAT-free native import and its identity/partial-result/resume guards, approved
 definition updates, opt-in Git sync refusals, the explicit plan-attachment
 fallback, notebook resume without duplicates, the SQL-endpoint binding check,
 per-folder ingestion and retrieval evidence, the Web IQ binding confirmation, up-front
-sign-in, admin-first consent (including the app's scope and Work IQ's), feature
+sign-in, admin-first consent (including the app's scope, the reprint client's and Work IQ's), feature
 registration, permission refusals mapped to grants, bounded retries, the agent
-publication and its digests, the optional Work IQ tool, and the app's build, tag
-and plan gates. Teardown tests must cover exact destroy-plan approval, purge
+publication and its digests, the optional Work IQ tool, the reprint phase's KQL role
+grant, build, tag, plan and readiness gates, and the app's build, tag
+and plan gates. `validate` also refuses a tool whose `server_url` or
+`project_connection_id` isn't exactly one placeholder, and any tool but
+`tools/ReprintRequest.json` that names the reprint request server's label or
+placeholders. Teardown tests must cover exact destroy-plan approval, purge
 ordering, target isolation, partial failure/resume and retention reporting
 without cloud calls. Do not run the runner's `up` or `down`
 command as a template check; the runner refuses the template and its forks anyway. When changing a phase, keep it
@@ -95,16 +102,25 @@ For the app, run `npm ci`, `npm run lint`, `npm run build` and `npm test` from
 run with placeholder settings are fine; do not push images or start the app
 against a deployed agent as a template check: those need a chosen target.
 
+For the reprint request server, run `npm ci`, `npm run lint`, `npm run typecheck` and
+`npm test` from `scenario/workflows/reprint-request/`; its tests use a fake Eventhouse
+and locally signed tokens. Where Docker is available,
+`docker build --tag reprint-request:check scenario/workflows/reprint-request` and a
+local run with placeholder settings are fine; do not push images or point it at a
+deployed KQL database as a template check.
+
 [CI](../../workflows/ci.yml) runs the Terraform, Python (including the agent definitions
-and the Fabric notebook tests), app, app image and shell syntax checks on every pull request
+and the Fabric notebook tests), app, app image, reprint request server and its image,
+and shell syntax checks on every pull request
 with a read-only token and no secrets or cloud access. Contributions
 arrive from forks, so keep it that way: never add `pull_request_target`, secrets or write
 permissions. Keep its commands in step with this section and its Terraform version with the
 devcontainer.
-`app/package-lock.json` must resolve from `https://registry.npmjs.org/`; CI rejects private
+`app/package-lock.json` and `scenario/workflows/reprint-request/package-lock.json` must
+resolve from `https://registry.npmjs.org/`; CI rejects private
 mirror URLs, and `CONTRIBUTING.md` shows how to normalize them. Dependabot proposes npm
-updates for `app/`, Docker base-image updates for `app/Dockerfile`, GitHub Actions and
-dev container updates; review them like any dependency change.
+and Docker base-image updates for `app/` and `scenario/workflows/reprint-request/`,
+GitHub Actions and dev container updates; review them like any dependency change.
 
 For devcontainer changes, validate the configuration against the Dev Container schema and inspect feature options against their published definitions. If Docker is available, build/start an isolated checkout without local credentials/state, run `.devcontainer/check-tools.sh`, then stop/remove only that test container. A container check must not sign in, initialize Terraform, seed or deploy.
 
@@ -121,7 +137,7 @@ MCP configuration.
 
 Keep always-applicable rules in `AGENTS.md`, task procedures in `.github/skills/<name>/SKILL.md`, and explanations in the canonical docs. Use skill metadata with a clear trigger; do not require developers to install the same skill globally or duplicate root instructions in App settings.
 
-Keep base-image, Terraform and Copilot pins compatible with their documented requirements. Install the official Copilot release with mandatory checksum verification during image build; keep startup free of installs and cloud operations. Preserve Node >= 24.11.0 and Git >= 2.27.0. Check plugin registration without invoking an app skill or signing in. Keep the web app's React, Vite, MSAL, jose and OpenTelemetry dependencies in `app/package.json` and `app/package-lock.json`, not in global tools or the devcontainer. The image builds with ACR Tasks, so the devcontainer needs no container engine. Do not add Fabric CLI, fabric-cicd, local Spark or Azure deployment wrappers just to validate the template.
+Keep base-image, Terraform and Copilot pins compatible with their documented requirements. Install the official Copilot release with mandatory checksum verification during image build; keep startup free of installs and cloud operations. Preserve Node >= 24.11.0 and Git >= 2.27.0. Check plugin registration without invoking an app skill or signing in. Keep the web app's React, Vite, MSAL, jose and OpenTelemetry dependencies in `app/package.json` and `app/package-lock.json`, and the reprint request server's in its own `package.json` and lockfile, not in global tools or the devcontainer. The images build with ACR Tasks, so the devcontainer needs no container engine. Do not add Fabric CLI, fabric-cicd, local Spark or Azure deployment wrappers just to validate the template.
 
 Keep Codespaces SSH private and managed through `gh codespace ssh`; do not publish its port, set passwords or disable host verification. App-driven deployment must route both commands and file changes to the same remote checkout/state.
 

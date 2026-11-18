@@ -121,6 +121,11 @@ class EvalExpectationTests(unittest.TestCase):
                 self.assertNotIn(total, CASES["weeks"][week]["gbp"])
                 # The authority matrix sends an expedited reprint of this size to the publishing director.
                 self.assertLessEqual(expedite["investment_gbp"], 150000)
+                # The reprint request proposes the recommended expedite option with exactly its row's values.
+                self.assertEqual(cases["reprint-request"]["approval"]["arguments_by_week"][week], {
+                    "signal_id": expedite["signal_id"], "option_id": expedite["option_id"],
+                    "edition_id": expedite["edition_id"], "territory": expedite["territory"],
+                    "quantity": expedite["units"], "expedited": True, "investment_gbp": expedite["investment_gbp"]})
         self.assertIn("| Expedited reprint | Up to £150,000 | Publishing director |", document("bks-gov-003"))
         self.assertIn("publishing director", cases["options-and-approver"]["includes"])
         policy = document("bks-pol-001")

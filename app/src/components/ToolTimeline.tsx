@@ -19,7 +19,7 @@ export function ToolTimeline({ calls }: { calls: readonly ToolCall[] }) {
             {call.error && <p className="tool-error">{call.error}</p>}
             {call.arguments && (
               <details className="tool-args">
-                <summary>Query</summary>
+                <summary>{iq === 'action' ? 'Request' : 'Query'}</summary>
                 <code>{call.arguments}</code>
               </details>
             )}

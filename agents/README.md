@@ -6,14 +6,15 @@
 
 One Foundry prompt agent definition in two variants: the same model, the same instructions and the
 same question, with only the tools changing, so the app can compare an answer with IQ against one
-without. Each tool is an MCP tool limited to its read-only `allowed_tools`, without approval steps.
-The agents run with the signed-in user's token, which the app forwards: Fabric IQ and Work IQ mail
-act as that user, and the agents read the Foundry IQ knowledge base and call Web IQ as the Foundry
-project.
+without. Each tool is an MCP tool limited to its reviewed `allowed_tools`. Every tool reads only and
+runs without an approval step, except one: the reprint request tool, whose every call the signed-in
+user approves in the app first ([the one action](#the-one-action)). The agents run with the signed-in
+user's token, which the app forwards: Fabric IQ, Work IQ mail and the reprint request act as that
+user, and the agents read the Foundry IQ knowledge base and call Web IQ as the Foundry project.
 
 | Variant | Directory | Runner key | Agent name | Display name | Tools |
 | --- | --- | --- | --- | --- | --- |
-| With IQ | `scenario-with-iq/` | `with_iq` | `<project>-with-iq` | Book performance assistant – with IQ | Fabric IQ ontology, Foundry IQ knowledge, Web IQ public context and, when Work IQ is enabled, Work IQ mail |
+| With IQ | `scenario-with-iq/` | `with_iq` | `<project>-with-iq` | Book performance assistant – with IQ | Fabric IQ ontology, Foundry IQ knowledge, Web IQ public context, the approval-gated reprint request and, when Work IQ is enabled, Work IQ mail |
 | Without IQ | `scenario-without-iq/` | `without_iq` | `<project>-without-iq` | Book performance assistant – without IQ | None |
 
 Terraform names each variant in its `foundry_agents` output and gives the names to the container
@@ -29,11 +30,14 @@ app as `AGENT_WITH_IQ` and `AGENT_WITHOUT_IQ`.
 | `tools/FoundryIQKnowledge.json` | With IQ | `foundry_iq_knowledge`: the agents' knowledge base of [approved documents](../scenario/knowledge/README.md), such as the reprint and stock policy, allowing only `knowledge_base_retrieve`, as the project. |
 | `tools/WebIQPublicContext.json` | With IQ | `web_iq_public_context`: Web IQ's MCP server, allowing only its `web` search with passage content, through the keyless `web-iq` connection as the project. |
 | `tools/WorkIQMail.json` | With IQ, when Work IQ is enabled | `work_iq_mail`: Work IQ's MCP server, allowing only `fetch`, on the `work-iq` connection, as the user. |
+| `tools/ReprintRequest.json` | With IQ | `reprint_request`: the [reprint request server](../scenario/workflows/reprint-request/README.md), allowing only `submit_reprint_request` with `require_approval: "always"`, on the `reprint-request` connection, as the user. |
 
 Each tool file holds exactly `type: mcp`, its `server_label`, `server_description`, `server_url`,
-`project_connection_id`, `allowed_tools` and `require_approval: never`, and no headers: every tool
-authenticates through its project connection, so no definition holds a credential. The runner fills
-the placeholders from Terraform outputs and refuses any other placeholder:
+`project_connection_id`, `allowed_tools` and `require_approval`, and no headers: every tool
+authenticates through its project connection, so no definition holds a credential. `server_url` and
+`project_connection_id` are each exactly one placeholder, so no definition holds a deployment's URL or
+connection name either. `require_approval` is `never` in every tool but `ReprintRequest.json`. The
+runner fills the placeholders from Terraform outputs and refuses any other placeholder:
 
 | Placeholders | Terraform output |
 | --- | --- |
@@ -43,6 +47,7 @@ the placeholders from Terraform outputs and refuses any other placeholder:
 | `knowledge_base_mcp_endpoint`, `knowledge_base_connection` | `foundry_tool_connections.knowledge_base` |
 | `public_context_mcp_endpoint`, `public_context_connection` | `foundry_tool_connections.public_context` |
 | `work_iq_mail_mcp_endpoint`, `work_iq_mail_connection` | `foundry_tool_connections.work_iq_mail`, null when Work IQ is disabled |
+| `reprint_request_mcp_endpoint`, `reprint_request_connection` | `foundry_tool_connections.reprint_request` |
 
 ## Tools and instructions
 
@@ -63,14 +68,25 @@ shared instructions stay generic:
 - **Work IQ mail** makes one `fetch` of exactly
   `/me/messages?$search="<title name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
   Work IQ's server also offers tools that act, so the tool allows only `fetch`.
+- **Reprint request** is only for a user who asks to submit or raise a reprint request: the agent
+  first asks Fabric IQ for the week's inventory risk and its reprint options, then calls
+  `submit_reprint_request` once with the chosen option's exact values, a short rationale and
+  evidence that names the signal and the policy sections. It never serves a reallocation, a pause,
+  marketing or any other change, and it reports the request or the refusal the server returns.
 
 The instructions open with which tools each kind of question calls, then the rules (quote every
 figure as a row gives it and never calculate one, label an inference instead of claiming a cause,
-cite only sources received in the conversation, never fill a gap from memory, read-only), then the
-reply format: a Markdown answer with a marker after each fact (`[D1]` ontology data, `[F1]` or `[F1 §2]` an
-approved document, `[Web1]` public context, `[W1]` a mail message), a *Sources* line per marker (for an
-ontology question, a line per row it cites, by entity and key) and a numbered *Steps* list of the tools
-called. The app shows the markers as source chips. Because the
+cite only sources received in the conversation, never fill a gap from memory, and change nothing but
+a reprint request the user asks for), then the reply format: a Markdown answer with a marker after
+each fact (`[D1]` ontology data, `[F1]` or `[F1 §2]` an approved document, `[Web1]` public context,
+`[W1]` a mail message, `[A1]` a recorded reprint request), a *Sources* line per marker (for an
+ontology question, a line per row it cites, by entity and key; for a request,
+`[A1] Reprint request · <request ID> · <status> · <approver> (<approver role>) · <approved at>`) and a
+numbered *Steps* list of the tools called. The app shows the markers as source chips, and `[A1]` as a
+neutral "Reprint request" chip. The agent proposes a reprint request with one option's exact values,
+and the user approves or rejects it in the app; any other change gets one fixed refusal: "I can't
+submit, change or approve that. A person on the team makes that decision; I can draft or check it for
+you." Because the
 without-IQ variant shares the instructions, they hold no document content or sample facts: those
 reach an agent only through its tools. They stay within 8,000 characters and contain no braces.
 
@@ -86,6 +102,25 @@ consent to `WorkIQAgent.Ask` and `offline_access`, and each user's one-time cons
 ([Work IQ](../docs/getting-started.md#work-iq)). After switching `work_iq_enabled`, rerun the
 deployment through the agent phase. Without a tenant that meets these prerequisites, Work IQ stays
 unverified.
+
+## The one action
+
+`ReprintRequest.json` is the only tool that changes anything, an approved deviation from read-only
+tools. It calls the [reprint request server](../scenario/workflows/reprint-request/README.md) through
+the `reprint-request` connection, as the signed-in user, and allows only `submit_reprint_request` with
+`require_approval: "always"`: Foundry holds each call until the user approves or rejects it on the
+app's approval card. The server then checks the user's approval role against the decision authority
+matrix and every value against the week's governed option before it records the request, which the
+agent cites as `[A1]`. Unlike `WorkIQMail`, the tool is never left out of the with-IQ variant.
+
+`foundry_agent.py validate` ties this exception to the server, not just the file name. Only
+`tools/ReprintRequest.json` may name the reprint request server, and only with exactly the
+`reprint_request` label, `{{reprint_request_mcp_endpoint}}`, `{{reprint_request_connection}}`,
+`allowed_tools: ["submit_reprint_request"]` and `require_approval: "always"`. Any other tool that names
+that label or either placeholder is refused, whatever it asks for, and every other tool must have
+`require_approval: "never"`. Never add another write tool, widen this one's arguments or allow-list,
+or approve on a user's behalf: DEV can't take an approval back, so the evals and readiness checks only
+ever reject ([runtime integration](../docs/runtime-integration.md#reprint-request)).
 
 ## Add a variant
 
@@ -124,6 +159,8 @@ python3 .github/skills/deploy-platform/scripts/foundry_agent.py render \
 
 `validate` loads every variant, including the optional tool, and checks that the shared files are
 byte-identical. Leave out `--omit WorkIQMail` to render the definition with Work IQ. When you change
-a definition, keep every tool read-only with its exact allow-list and no approval step, then run
+a definition, keep every tool but `ReprintRequest.json` read-only with its exact allow-list and
+`require_approval: "never"`, keep the reprint request tool exactly as [the one action](#the-one-action)
+describes, and name every server and connection through its placeholder, then run
 `python3 -B -m unittest discover -s .github/skills/deploy-platform/tests`. Never add a tool, widen an
 allow-list or add a credential to pass a check.

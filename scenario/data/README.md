@@ -6,12 +6,12 @@ authors, imprints, printers, campaigns and figures. Never add a real title, auth
 | Owner | Writes | Semantics |
 | --- | --- | --- |
 | [`SeedBooks`](../../workspace/SeedBooks.Notebook/notebook-content.py) | The raw tables and `Files/documents/starter.txt` | A deterministic generator; insert-only by key, so existing rows and the file are never changed |
-| [`ComputeBookSignals`](../../workspace/ComputeBookSignals.Notebook/notebook-content.py) | The derived tables | Fixed rules over the raw tables; each run replaces the derived rows with the same rows for the same data |
+| [`ComputeBookSignals`](../../workspace/ComputeBookSignals.Notebook/notebook-content.py) | The derived tables, new `reprint_requests` rows and each run in `BookSignals` | Fixed rules over the raw tables; each run replaces the derived rows with the same rows for the same data. It first copies approved requests from `BookSignals`, insert-only by `request_id`, and last appends the run to `BookSignals` |
 | [`PublishBooksKnowledge`](../../workspace/PublishBooksKnowledge.Notebook/notebook-content.py) | The approved documents in `Files/documents` | Insert-only: writes a missing file and never overwrites one; see the [approved documents](../knowledge/README.md) |
 | [`BooksOntology`](../../workspace/BooksOntology.Ontology) | Nothing | Maps seven tables to entities that Fabric IQ queries live, as the signed-in user |
 
-All tables are Delta tables in the `Books` lakehouse's `dbo` schema. Amounts are pounds, as whole pounds
-except prices and unit costs. Flags are the strings `Yes` and `No`.
+All tables are Delta tables in the `Books` lakehouse's `dbo` schema, except the `BookSignals` KQL database's
+(below). Amounts are pounds, as whole pounds except prices and unit costs. Flags are the strings `Yes` and `No`.
 
 ## Weeks
 
@@ -31,7 +31,7 @@ the latest week in `weekly_sales`, the as-of week, and `ComputeBookSignals` need
 | `inventory_weekly` | Print edition x territory x week; all three | `on_hand_units` (end of week), `on_order_units`, `received_units`, `next_arrival_week` | `next_arrival_week` when nothing is on order |
 | `public_momentum` | Title x week; both | `search_index` (100 is the title's reference level), `media_mentions`, `review_count` (cumulative), `avg_rating` | None |
 | `campaigns` | A campaign; `campaign_id` | `title_id`, `title_name`, `campaign_name`, `channel`, `territory`, `start_date`, `end_date`, `budget_gbp` | None |
-| `reprint_requests` | An approved reprint request; `request_id` | `signal_id`, `title_id`, `title_name`, `edition_id`, `territory`, `quantity`, `expedited`, `rationale`, `evidence`, `approver_name`, `approved_at`, `status` | Empty until a request is approved |
+| `reprint_requests` | An approved reprint request; `request_id` | `signal_id`, `title_id`, `title_name`, `edition_id`, `territory`, `quantity`, `expedited`, `rationale`, `evidence`, `approver_name`, `approved_at`, `status` | Empty until a request is approved and copied from `BookSignals` |
 
 Territories are UK, US and ANZ. Print editions sell through Major retail, Independent and Online retail;
 Ebook and Audio through Digital. Print sales never exceed the stock on hand, so the generator's stock and
@@ -48,6 +48,22 @@ reprints are tuned to avoid sell-outs that would hide demand, with one deliberat
 Signal and option IDs contain the as-of week, so they identify a row within its week. The notebooks'
 schemas fix the column order and types of every ontology table, and match the ontology's table
 definitions; a test checks both.
+
+## BookSignals KQL database
+
+The [`BookSignals`](../../workspace/BookSignals.KQLDatabase) KQL database, in the `BookEvents` Eventhouse,
+holds what the reprint server reads and writes. Its tables map the lakehouse types `STRING`, `BIGINT` and
+`DOUBLE` to `string`, `long` and `real`, and `DATE` and `TIMESTAMP` to `datetime`; a KQL string is empty, never
+null.
+
+| Table | Writer | What it holds |
+| --- | --- | --- |
+| `reprint_requests` | The reprint server | Each approved request: the lakehouse table's columns and `option_id`, `investment_gbp`, `required_approver`, `approver_role`, `approver_object_id` and `as_of_week`. `ComputeBookSignals` copies the lakehouse columns of new requests into `dbo.reprint_requests` before computing |
+| `title_signals`, `decision_options` | `ComputeBookSignals` | Each run's derived rows, with its `run_id` and `computed_at` |
+| `signal_runs` | `ComputeBookSignals` | One row per run, appended after its rows: `as_of_week` and both tables' row counts. A run without it is incomplete |
+
+The functions `latest_run()`, `latest_title_signals()` and `latest_decision_options()` read only the latest
+complete run: the newest as-of week, then the newest computation.
 
 ## Rules
 

@@ -1,18 +1,20 @@
 // One question to one Foundry prompt agent, as the signed-in user: the Responses API on the project endpoint, with
 // the agent referenced by name and the user's own Foundry token, streamed so each MCP tool call is reported as it
 // starts and finishes. A follow-up continues the previous response. Foundry runs the agent's tools; the server only
-// relays what the run reports. The request carries the active span's W3C trace context, which Foundry's server-side
+// relays what the run reports. A tool that needs approval pauses the run until the user's decision, which continues
+// the response that holds it. The request carries the active span's W3C trace context, which Foundry's server-side
 // trace of the run continues.
 import { context, propagation } from '@opentelemetry/api'
-import { ARGUMENTS_LIMIT, type ToolCall, type TurnOutcome } from '../src/live/protocol.ts'
+import {
+  APPROVAL_ARGUMENTS_LIMIT, ARGUMENTS_LIMIT, isApprovalRequest, type ApprovalDecision, type ApprovalRequest, type ToolCall, type TurnOutcome,
+} from '../src/live/protocol.ts'
 import { readSse } from './sse.ts'
 
-export interface AgentRun {
+interface RunBase {
   endpoint: string
   agent: string
   token: string
-  question: string
-  // Foundry's ID of the response this question follows up.
+  // Foundry's ID of the response this question follows up, or that holds the approval request a decision answers.
   previousResponseId?: string
   // Value-free labels Foundry stores with the run: the cid and the variant.
   metadata: Record<string, string>
@@ -23,6 +25,12 @@ export interface AgentRun {
   fetch?: typeof fetch
   clock?: () => number
 }
+
+// A question, or the user's decision on the tool call the previous response holds for approval.
+export type AgentRun = RunBase & (
+  | { question: string; approval?: undefined }
+  | { approval: ApprovalDecision; previousResponseId: string; question?: undefined }
+)
 
 type Json = Record<string, unknown>
 
@@ -54,6 +62,20 @@ function errorText(value: unknown): string | undefined {
 
 function failed(message: string, toolCalls: ToolCall[] = [], extra: { code?: string; responseId?: string } = {}): TurnOutcome {
   return { status: 'failed', message, toolCalls, ...extra }
+}
+
+// A tool call Foundry holds for approval, as the card shows it: undefined unless its ID, names and arguments are
+// plainly readable, because the user approves exactly what the card shows and never a part of it.
+function approvalRequest(item: Json): ApprovalRequest | undefined {
+  if (typeof item.arguments !== 'string' || item.arguments.length > APPROVAL_ARGUMENTS_LIMIT) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(item.arguments)
+  } catch {
+    return undefined
+  }
+  const approval = { id: item.id, server: item.server_label, tool: item.name, arguments: parsed }
+  return isApprovalRequest(approval) ? approval : undefined
 }
 
 // What a refused request means for the user, without echoing anything but the service's short message.
@@ -89,16 +111,21 @@ class Run {
   readonly listed = new Map<string, number>()
   responseId?: string
   consent?: { url: string; server?: string }
+  // The tool calls the run holds for approval, by ID: the user approves exactly one, or none is offered.
+  readonly held = new Map<string, Json>()
   final?: Json
   streamError?: { message: string; code?: string }
   deltas: string[] = []
   done = false
   private readonly clock: () => number
   private readonly onTool: (call: ToolCall) => void
+  // The approval request this run's decision answers, should Foundry list it again.
+  private readonly answered?: string
 
-  constructor(clock: () => number, onTool: (call: ToolCall) => void) {
+  constructor(clock: () => number, onTool: (call: ToolCall) => void, answered?: string) {
     this.clock = clock
     this.onTool = onTool
+    this.answered = answered
   }
 
   apply(type: string, data: Json): void {
@@ -114,6 +141,7 @@ class Run {
       case 'response.output_item.done':
         if (item?.type === 'mcp_call') this.finish(item)
         else if (item?.type === 'oauth_consent_request') this.ask(item)
+        else if (item?.type === 'mcp_approval_request') this.hold(item)
         else if (item?.type === 'mcp_list_tools' && typeof item.server_label === 'string') {
           this.listed.set(item.server_label, Array.isArray(item.tools) ? item.tools.length : 0)
         }
@@ -166,6 +194,11 @@ class Run {
     if (url && !this.consent) this.consent = { url, ...(typeof item.server_label === 'string' ? { server: item.server_label } : {}) }
   }
 
+  private hold(item: Json): void {
+    const id = typeof item.id === 'string' ? item.id : `held-${this.held.size + 1}`
+    if (id !== this.answered) this.held.set(id, item)
+  }
+
   private report(call: ToolCall): void {
     this.calls.set(call.id, call)
     this.onTool(call)
@@ -188,6 +221,7 @@ class Run {
   outcome(): TurnOutcome {
     const toolCalls = this.toolCalls()
     const extra = this.responseId ? { responseId: this.responseId } : {}
+    // A consent request comes first: the tool that asked for it didn't run, so nothing waits for approval yet.
     const consent = this.consent ?? this.consentFromErrors()
     if (consent) return { status: 'needs-consent', consentUrl: consent.url, ...(consent.server ? { server: consent.server } : {}), ...extra, toolCalls }
     if (this.streamError) return failed(`Foundry stopped the run: ${this.streamError.message}`, toolCalls, { ...extra, ...(this.streamError.code ? { code: this.streamError.code } : {}) })
@@ -202,6 +236,21 @@ class Run {
       const details = record(final.incomplete_details) ? final.incomplete_details : {}
       const reason = typeof details.reason === 'string' ? details.reason : 'unknown'
       return failed(`The agent's answer was cut off (${reason}). Ask again.`, toolCalls, { ...extra, code: reason })
+    }
+    // A run that holds a tool call for approval waits for the user's decision, which continues it. A message the model
+    // wrote before the call is not the answer: shown alone, it would leave the call waiting unseen, and the answer
+    // after the decision states what matters.
+    if (this.held.size > 1) {
+      return failed('The agent proposed more than one call at once, so none is offered for approval and nothing ran. Ask again.', toolCalls, { ...extra, code: 'approval_several' })
+    }
+    const [item] = this.held.values()
+    if (item) {
+      const approval = approvalRequest(item)
+      if (!approval) {
+        return failed("The agent proposed a tool call the app can't show in full, so it isn't offered for approval and nothing ran. Ask again.", toolCalls, { ...extra, code: 'approval_unreadable' })
+      }
+      if (!this.responseId) return failed('Foundry held a tool call for your approval without a response to continue, so nothing ran. Ask again.', toolCalls, { code: 'approval_unanswerable' })
+      return { status: 'needs-approval', approval, responseId: this.responseId, toolCalls }
     }
     const text = answerText(final) || this.deltas.join('')
     if (!text.trim()) return failed('The agent finished without an answer. Ask again.', toolCalls, extra)
@@ -231,7 +280,7 @@ export async function askAgent(run: AgentRun): Promise<TurnOutcome> {
   const clock = run.clock ?? Date.now
   const timeout = AbortSignal.timeout(run.timeoutMs)
   const signal = AbortSignal.any([run.signal, timeout])
-  const state = new Run(clock, run.onTool)
+  const state = new Run(clock, run.onTool, run.approval?.id)
   const stopped = (): TurnOutcome => (timeout.aborted
     ? failed(`The agent didn't finish within ${Math.round(run.timeoutMs / 1000)} seconds. Ask again; a cold Fabric IQ query can be slow.`, state.toolCalls(), { code: 'timeout', ...(state.responseId ? { responseId: state.responseId } : {}) })
     : failed('Cancelled: the answer was no longer needed.', state.toolCalls(), { code: 'cancelled' }))
@@ -250,7 +299,10 @@ export async function askAgent(run: AgentRun): Promise<TurnOutcome> {
       headers,
       body: JSON.stringify({
         agent_reference: { type: 'agent_reference', name: run.agent },
-        input: run.question,
+        // A decision answers the approval request the previous response holds: Foundry then runs the call, or skips it.
+        input: run.approval
+          ? [{ type: 'mcp_approval_response', approval_request_id: run.approval.id, approve: run.approval.approve }]
+          : run.question,
         ...(run.previousResponseId ? { previous_response_id: run.previousResponseId } : {}),
         metadata: run.metadata,
         stream: true,

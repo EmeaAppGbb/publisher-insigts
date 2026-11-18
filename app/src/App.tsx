@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { Composer } from './components/Composer.tsx'
 import { ExchangeView, type TurnActions } from './components/Exchange.tsx'
 import { Header } from './components/Header.tsx'
-import { followUpFrom, newTurn, reduce, type Exchange, type Thread, type Turn } from './exchanges.ts'
+import { decisionTurn, followUpFrom, newTurn, questionOf, reduce, type Exchange, type Thread, type Turn } from './exchanges.ts'
 import type { Choice } from './labels.ts'
 import { createAgentClient, loadSession } from './live/client.ts'
 import type { Question, Session, Variant } from './live/types.ts'
@@ -82,11 +82,18 @@ export default function App() {
       const previousResponseId = followUpFrom(thread)
       const turn = newTurn(crypto.randomUUID(), text, performance.now(), previousResponseId)
       dispatch({ type: 'follow-up', threadId: thread.id, turn })
-      run(turn.id, { variant: thread.variant, text, ...(previousResponseId ? { previousResponseId } : {}) })
+      run(turn.id, questionOf(thread, turn))
+    },
+    // The decision continues the run that waits for it, as the thread's next turn.
+    onDecide: (thread: Thread, approve: boolean) => {
+      const turn = decisionTurn(thread, approve, crypto.randomUUID(), performance.now())
+      if (!turn) return
+      dispatch({ type: 'follow-up', threadId: thread.id, turn })
+      run(turn.id, questionOf(thread, turn))
     },
     onRetry: (thread: Thread, turn: Turn) => {
       dispatch({ type: 'restart', turnId: turn.id, startedAt: performance.now() })
-      run(turn.id, { variant: thread.variant, text: turn.question, ...(turn.previousResponseId ? { previousResponseId: turn.previousResponseId } : {}) })
+      run(turn.id, questionOf(thread, turn))
     },
     onStop: (turn: Turn) => controllers.current.get(turn.id)?.abort(),
     onSignIn: () => authenticate('signIn'),

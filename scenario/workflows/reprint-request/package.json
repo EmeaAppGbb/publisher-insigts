@@ -1,0 +1,32 @@
+{
+  "name": "reprint-request",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env.local src/main.ts",
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/main.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "start": "node --env-file-if-exists=.env.local dist/main.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.14.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "jose": "^6.2.17",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.2"
+  }
+}

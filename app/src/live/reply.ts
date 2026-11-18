@@ -1,12 +1,12 @@
 // Reads the agents' Markdown replies (an answer with source markers, then Sources and Steps) and renders their
-// Markdown as safe HTML, with each marker as a chip in its IQ's colour.
+// Markdown as safe HTML, with each marker as a chip in its IQ's colour, or the action's for a reprint request.
 import { IQ_NAMES } from './protocol.ts'
 import type { IqKey, Marker, ParsedReply, SourceLine } from './types.ts'
 
-// [D1], [F1 §2], [Web1], [W1]: a source prefix, its number and an optional section.
-export const MARKER = /\[(Web|W|F|D)(\d+)(?:\s*§\s*([\w.-]+))?\]/
-export const MARKER_KINDS: Readonly<Record<string, IqKey>> = { D: 'fabric', F: 'foundry', Web: 'web', W: 'work' }
-const IQ_ORDER: readonly IqKey[] = ['fabric', 'foundry', 'work', 'web']
+// [D1], [F1 §2], [Web1], [W1], [A1]: a source prefix, its number and an optional section.
+export const MARKER = /\[(Web|W|F|D|A)(\d+)(?:\s*§\s*([\w.-]+))?\]/
+export const MARKER_KINDS: Readonly<Record<string, IqKey>> = { D: 'fabric', F: 'foundry', Web: 'web', W: 'work', A: 'action' }
+const IQ_ORDER: readonly IqKey[] = ['fabric', 'foundry', 'work', 'web', 'action']
 const markerPattern = () => new RegExp(MARKER.source, 'g')
 
 // Sources or Steps alone on a line: plain, bold, as a heading or with a trailing colon.
@@ -14,7 +14,7 @@ const SECTION = /^ {0,3}(?:#{1,6}[ \t]+)?[*_]{0,2}[ \t]*(sources|steps)[ \t]*:?[
 const LIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+/
 const RULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
 // A source line starts with its marker; agents sometimes drop the brackets in this list.
-const SOURCE = /^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(?:\*\*|__)?\[?(Web|W|F|D)(\d+)(?:\s*§\s*[\w.-]+)?\]?(?:\*\*|__)?(?=[\s:|·–—-]|$)[ \t]*(?:[:|·–—-][ \t]*)?(.*)$/
+const SOURCE = /^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?(?:\*\*|__)?\[?(Web|W|F|D|A)(\d+)(?:\s*§\s*[\w.-]+)?\]?(?:\*\*|__)?(?=[\s:|·–—-]|$)[ \t]*(?:[:|·–—-][ \t]*)?(.*)$/
 const HTTP = /^https?:\/\/\S+$/i
 // Foundry's own retrieval citations, such as 【6:1†source】: the instructions forbid them, so any that slip through
 // are dropped rather than shown, beside the markers that cite the same passages.

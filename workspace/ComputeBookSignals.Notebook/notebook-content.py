@@ -12,16 +12,23 @@
 # MARKDOWN ********************
 
 # # Compute the latest week's book signals
-# Run after SeedBooks, and again whenever weekly data is added. It reads the
-# Books lakehouse in this notebook's current workspace and recomputes, for the
-# latest week in dbo.weekly_sales only, three derived tables with fixed rules:
-# title_signals, decision_options and title_performance. Each run replaces those
-# tables' rows with the same rows for the same data; source tables are only read.
+# Run after SeedBooks, and again whenever weekly data is added or a reprint request
+# is approved. It works only in this notebook's current workspace, on the Books
+# lakehouse and the BookSignals KQL database, with the running user's tokens.
+# First it copies the reprint requests the reprint server recorded in BookSignals
+# into dbo.reprint_requests, insert-only by request_id: an existing row is never
+# changed. Then it recomputes, for the latest week in dbo.weekly_sales only, three
+# derived tables with fixed rules: title_signals, decision_options and
+# title_performance. Each run replaces those tables' rows with the same rows for the
+# same data; the other source tables are only read. Last, it appends the run to
+# BookSignals: its title signals and decision options, then the signal_runs row that
+# completes it. Readers of BookSignals use only the latest complete run.
 # Every amount, ratio and recommendation comes from these rules, never from a model.
 
 # PARAMETERS CELL ********************
 
 lakehouse_name = "Books"
+kql_database_name = "BookSignals"
 
 # METADATA ********************
 
@@ -41,6 +48,8 @@ from pyspark.sql import SparkSession
 workspace_id = str(UUID(notebookutils.runtime.context["currentWorkspaceId"]))
 if not isinstance(lakehouse_name, str) or not lakehouse_name.strip():
     raise ValueError("lakehouse_name must name a lakehouse in the current workspace.")
+if not isinstance(kql_database_name, str) or not kql_database_name.strip():
+    raise ValueError("kql_database_name must name a KQL database in the current workspace.")
 
 lakehouse = notebookutils.lakehouse.get(lakehouse_name, workspace_id)
 if str(UUID(lakehouse.workspaceId)) != workspace_id:
@@ -427,6 +436,10 @@ DERIVED = (
      "search_momentum_change_pct DOUBLE, media_mentions_4w BIGINT, review_count BIGINT, avg_rating DOUBLE, "
      "live_campaign STRING"),
 )
+# SeedBooks' dbo.reprint_requests columns: the run copies the approved requests recorded in the KQL database into them.
+REQUESTS = ("request_id STRING, signal_id STRING, title_id STRING, title_name STRING, edition_id STRING, "
+            "territory STRING, quantity BIGINT, expedited STRING, rationale STRING, evidence STRING, "
+            "approver_name STRING, approved_at TIMESTAMP, status STRING")
 
 
 def table_path(name):
@@ -465,12 +478,253 @@ def write_table(name, rows, schema):
     print(f"{name}: wrote {len(rows)} rows.")
 
 
-derived = compute({name: read_table(name) for name in SOURCES})
+def copy_requests(rows):
+    """Insert requests into dbo.reprint_requests by request_id; an existing row is never changed."""
+    source = spark.createDataFrame(typed_rows("reprint_requests", rows, REQUESTS), schema=REQUESTS)
+    target = DeltaTable.forPath(spark, table_path("reprint_requests"))
+    if target.toDF().schema.simpleString() != source.schema.simpleString():
+        raise ValueError("Existing schema differs from the reprint request schema: reprint_requests")
+    (
+        target.alias("target")
+        .merge(source.alias("source"), "target.request_id = source.request_id")
+        .whenNotMatchedInsertAll()
+        .execute()
+    )
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import base64
+import json
+import re
+import time
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import requests
+
+api_root = "https://api.fabric.microsoft.com"
+ATTEMPTS = 5  # Per request, for throttling (429) and transient service errors (5xx).
+# Each lakehouse type's Kusto type, as a v1 response's ColumnType or DataType names it, and its KQL conversion.
+KUSTO_TYPES = {"STRING": ("string", "String", "tostring"), "BIGINT": ("long", "Int64", "tolong"),
+               "DOUBLE": ("real", "Double", "toreal"), "DATE": ("datetime", "DateTime", "todatetime"),
+               "TIMESTAMP": ("datetime", "DateTime", "todatetime")}
+# What a run adds to each title_signals and decision_options row, and the signal_runs row that completes the run.
+RUN_COLUMNS = "run_id STRING, computed_at TIMESTAMP"
+SIGNAL_RUNS = "run_id STRING, as_of_week DATE, computed_at TIMESTAMP, title_signals BIGINT, decision_options BIGINT"
+
+
+def schema_columns(schema):
+    return [tuple(part.strip().split(" ")) for part in schema.split(",")]
+
+
+def send(method, url, audience, **kwargs):
+    """One request with the user's token for `audience`; throttling and service errors are retried, boundedly."""
+    for attempt in range(1, ATTEMPTS + 1):
+        response = requests.request(
+            method,
+            url,
+            headers={"Authorization": f"Bearer {notebookutils.credentials.getToken(audience)}",
+                     "Accept": "application/json"},
+            timeout=120,
+            allow_redirects=False,
+            **kwargs,
+        )
+        if (response.status_code != 429 and response.status_code < 500) or attempt == ATTEMPTS:
+            return response
+        delay = response.headers.get("Retry-After", "")
+        time.sleep(min(int(delay), 60) if delay.isdigit() else 2 ** attempt)
+
+
+def fabric_request(method, path, **kwargs):
+    if not path.startswith("/v1/") or "://" in path:
+        raise ValueError("Fabric requests must use a relative v1 API path.")
+    response = send(method, f"{api_root}{path}", "pbi", **kwargs)
+    if response.status_code != 200:
+        raise RuntimeError(f"Fabric {method} {path} failed ({response.status_code}): {response.text[:1000]}")
+    return response
+
+
+def find_kql_database():
+    """The item ID and query URI of the current workspace's KQL database named kql_database_name."""
+    matches, params, seen_tokens = [], {}, set()
+    while True:
+        page = fabric_request("GET", f"/v1/workspaces/{workspace_id}/kqlDatabases", params=params).json()
+        matches.extend(item for item in page["value"] if item["displayName"] == kql_database_name)
+        token = page.get("continuationToken")
+        if not token:
+            break
+        if token in seen_tokens:
+            raise RuntimeError("Fabric KQL database listing repeated its continuation token.")
+        seen_tokens.add(token)
+        params = {"continuationToken": token}
+    if len(matches) != 1:
+        raise ValueError(f"Expected one KQL database named {kql_database_name} in the current workspace.")
+    item = matches[0]
+    if item["type"] != "KQLDatabase" or str(UUID(item["workspaceId"])) != workspace_id:
+        raise ValueError("Refusing to use a KQL database outside the current workspace.")
+    uri = str(item["properties"].get("queryServiceUri") or "").rstrip("/")
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]+\.kusto\.fabric\.microsoft\.com", uri):
+        raise ValueError("The KQL database returned an unexpected query URI.")
+    return str(UUID(item["id"])), uri
+
+
+def kusto(kind, csl, action, database=None):
+    """Run a query (kind "query") or management command ("mgmt"); return the first result table's column names,
+    column types and rows."""
+    body = {"csl": csl} if database is None else {"db": database, "csl": csl}
+    response = send("POST", f"{query_uri}/v1/rest/{kind}", "kusto", json=body)
+    if response.status_code != 200:
+        raise RuntimeError(f"Kusto {action} failed ({response.status_code}): {response.text[:500]}")
+    try:
+        result = response.json()
+        table = result["Tables"][0]
+        names = [column["ColumnName"] for column in table["Columns"]]
+        kinds = [column.get("ColumnType") or column.get("DataType") for column in table["Columns"]]
+        rows = table["Rows"]
+        valid = not result.get("Exceptions") and all(isinstance(row, list) and len(row) == len(names) for row in rows)
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise RuntimeError(f"Kusto {action} returned an unexpected response.")
+    return names, kinds, rows
+
+
+def kusto_database(item_id):
+    """The Kusto name of the KQL database: the one .show databases row whose DatabaseName or PrettyName is its
+    display name or item ID. Fabric can name a database by its item ID and show the display name as PrettyName."""
+    # .show databases is cluster-scoped, so the request names no database.
+    names, _, rows = kusto("mgmt", ".show databases", ".show databases")
+    if not {"DatabaseName", "PrettyName"} <= set(names):
+        raise RuntimeError("Kusto .show databases returned an unexpected response.")
+    wanted = {kql_database_name.casefold(), item_id}
+    found = [row[names.index("DatabaseName")] for row in rows
+             if wanted & {str(row[names.index(column)] or "").casefold() for column in ("DatabaseName", "PrettyName")}]
+    if len(found) != 1 or not isinstance(found[0], str) or not found[0]:
+        raise ValueError(f"Expected one Kusto database for the {kql_database_name} KQL database.")
+    return found[0]
+
+
+def from_kusto(value, kind):
+    """A v1 response value as the lakehouse column type holds it; a datetime is timezone-aware UTC."""
+    if value is None:
+        return None
+    if kind == "STRING" and isinstance(value, str) or kind == "BIGINT" and type(value) is int:
+        return value
+    if kind == "TIMESTAMP" and isinstance(value, str):
+        match = re.fullmatch(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d{1,7}))?Z", value)
+        if match:
+            *parts, fraction = match.groups()
+            return datetime(*map(int, parts), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=timezone.utc)
+    raise ValueError(f"{kql_database_name}.reprint_requests returned an unexpected {kind} value: {value!r}")
+
+
+def kql_requests():
+    """Every request in the KQL database's reprint_requests, with the dbo.reprint_requests columns."""
+    columns = schema_columns(REQUESTS)
+    names, kinds, rows = kusto("query", "reprint_requests | project " + ", ".join(name for name, _ in columns),
+                               "reprint_requests query", kusto_name)
+    if names != [name for name, _ in columns] or any(
+            kind not in KUSTO_TYPES[ddl][:2] for kind, (_, ddl) in zip(kinds, columns)):
+        raise ValueError(f"{kql_database_name}.reprint_requests does not have the lakehouse request columns.")
+    return [{name: from_kusto(value, ddl) for value, (name, ddl) in zip(row, columns)} for row in rows]
+
+
+def kql_value(value, kind):
+    """A row value as JSON for its KQL conversion: dates and timestamps as ISO 8601 strings in UTC."""
+    if value is None:
+        return None
+    if kind == "DATE":
+        return value.isoformat()
+    if kind == "TIMESTAMP":
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return {"DOUBLE": float, "BIGINT": int}.get(kind, str)(value)
+
+
+def appended(table):
+    """How many of this run's rows a KQL table holds."""
+    _, _, rows = kusto("query", f"{table} | where run_id == '{run_id}' | count", f"{table} count", kusto_name)
+    if len(rows) != 1 or type(rows[0][0]) is not int:
+        raise RuntimeError(f"Kusto {table} count returned an unexpected response.")
+    return rows[0][0]
+
+
+def append_run(table, schema, rows):
+    """Append this run's rows to a KQL table in one ingestion tagged with the run, then count them back.
+
+    The rows travel as base64 JSON, so no value is parsed as KQL. With ingestIfNotExists, a retried append that the
+    service had already committed fails, so a failed append counts as written only when its rows read back.
+    """
+    if not rows:
+        return
+    columns = schema_columns(schema)
+    payload = [{name: kql_value(row[name], kind) for name, kind in columns} for row in rows]
+    data = base64.b64encode(
+        json.dumps(payload if len(payload) > 1 else payload[0], allow_nan=False).encode("utf-8")
+    ).decode("ascii")
+    source = f"print r = parse_json(base64_decode_tostring('{data}'))" + (" | mv-expand r" if len(payload) > 1 else "")
+    project = ", ".join(f"['{name}'] = {KUSTO_TYPES[kind][2]}(r['{name}'])" for name, kind in columns)
+    tag = f"{run_id}-{table}"
+    try:
+        kusto("mgmt", f".append {table} with (ingestIfNotExists = '[\"{tag}\"]', tags = '[\"ingest-by:{tag}\"]') "
+                      f"<| {source} | project {project}", f".append {table}", kusto_name)
+        failure = None
+    except RuntimeError as error:
+        failure = error
+    count = appended(table)
+    if count != len(rows):
+        raise failure or RuntimeError(f"{kql_database_name}.{table} holds {count} of run {run_id}'s {len(rows)} rows.")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+kql_database_id, query_uri = find_kql_database()
+kusto_name = kusto_database(kql_database_id)
+print(f"{kql_database_name}: Kusto database {kusto_name} in the current workspace.")
+
+recorded = kql_requests()
+sources = {name: read_table(name) for name in SOURCES}
+known = {row["request_id"] for row in sources["reprint_requests"]}
+new_requests = {}
+for row in recorded:
+    if row["request_id"] not in known:
+        new_requests.setdefault(row["request_id"], row)
+if new_requests:
+    copy_requests(list(new_requests.values()))
+    sources["reprint_requests"] = read_table("reprint_requests")
+print(f"reprint_requests: inserted {len(new_requests)} of {len(recorded)} requests from {kql_database_name}; "
+      "retained all existing rows.")
+
+derived = compute(sources)
 for table_name, table_schema in DERIVED:
     write_table(table_name, derived[table_name], table_schema)
 
 material = [row for row in derived["title_signals"] if row["is_material"] == "Yes"]
 as_of_week = derived["title_performance"][0]["as_of_week"]
+
+# The run's rows first and its signal_runs row last: a run without that row is incomplete and never read.
+run_id, computed_at = str(uuid4()), datetime.now(timezone.utc)
+stamp = {"run_id": run_id, "computed_at": computed_at}
+for table_name in ("title_signals", "decision_options"):
+    append_run(table_name, f"{dict(DERIVED)[table_name]}, {RUN_COLUMNS}",
+               [dict(row, **stamp) for row in derived[table_name]])
+    print(f"{kql_database_name}.{table_name}: appended {len(derived[table_name])} rows for run {run_id}.")
+append_run("signal_runs", SIGNAL_RUNS, [dict(stamp, as_of_week=as_of_week, title_signals=len(derived["title_signals"]),
+                                             decision_options=len(derived["decision_options"]))])
+print(f"{kql_database_name}.signal_runs: run {run_id} is complete.")
+
 print(f"Signals for the week of {as_of_week:%d %B %Y}: {len(material)} material of {len(derived['title_signals'])}.")
 for row in material:
     print(f"- {row['title_name']}: {row['signal_type']}. {row['headline']}.")
