@@ -11,7 +11,8 @@
 
 .create-or-alter function with (docstring = 'The latest complete ComputeBookSignals run: the newest as-of week, then the newest computation', folder = 'Books') latest_run() {
     signal_runs
-    | top 1 by as_of_week desc, computed_at desc
+    | sort by as_of_week desc, computed_at desc
+    | take 1
 }
 
 .create-or-alter function with (docstring = 'Title signals of the latest complete ComputeBookSignals run', folder = 'Books') latest_title_signals() {
