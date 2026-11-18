@@ -44,7 +44,23 @@
         "required": ["fabric_iq_ontology"]
       },
       "markers": ["D"],
-      "min_markers": {"D": 5},
+      "source_keys_by_week": {
+        "26": [
+          "sig-20261102-title-004-exc-ed-004-hb-uk",
+          "sig-20261102-title-001-fcv",
+          "sig-20261102-title-003-mkt",
+          "sig-20261102-title-003-mom",
+          "sig-20261102-title-004-fcv"
+        ],
+        "27": [
+          "sig-20261109-title-001-inv-ed-001-hb-uk",
+          "sig-20261109-title-004-exc-ed-004-hb-uk",
+          "sig-20261109-title-001-fcv",
+          "sig-20261109-title-003-mkt",
+          "sig-20261109-title-003-mom",
+          "sig-20261109-title-004-fcv"
+        ]
+      },
       "includes": ["The Glass Orchard", "Northbound Signals", "Salt and Starlight"],
       "includes_by_week": {
         "26": [
@@ -86,7 +102,18 @@
         "required": ["fabric_iq_ontology", "foundry_iq_knowledge"]
       },
       "markers": ["D", "F"],
-      "min_markers": {"D": 3},
+      "source_keys_by_week": {
+        "26": [
+          "sig-20261102-title-001-inv-ed-001-hb-uk-expedite",
+          "sig-20261102-title-001-inv-ed-001-hb-uk-standard",
+          "sig-20261102-title-001-inv-ed-001-hb-uk-reallocate"
+        ],
+        "27": [
+          "sig-20261109-title-001-inv-ed-001-hb-uk-expedite",
+          "sig-20261109-title-001-inv-ed-001-hb-uk-standard",
+          "sig-20261109-title-001-inv-ed-001-hb-uk-reallocate"
+        ]
+      },
       "includes": ["expedited reprint", "publishing director"],
       "includes_by_week": {
         "26": ["£50,000", "£84,571"],

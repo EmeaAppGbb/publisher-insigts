@@ -68,8 +68,9 @@ The instructions open with which tools each kind of question calls, then the rul
 figure as a row gives it and never calculate one, label an inference instead of claiming a cause,
 cite only sources received in the conversation, never fill a gap from memory, read-only), then the
 reply format: a Markdown answer with a marker after each fact (`[D1]` ontology data, `[F1]` or `[F1 §2]` an
-approved document, `[Web1]` public context, `[W1]` a mail message), a *Sources* line per marker and
-a numbered *Steps* list of the tools called. The app shows the markers as source chips. Because the
+approved document, `[Web1]` public context, `[W1]` a mail message), a *Sources* line per marker (for an
+ontology question, a line per row it cites, by entity and key) and a numbered *Steps* list of the tools
+called. The app shows the markers as source chips. Because the
 without-IQ variant shares the instructions, they hold no document content or sample facts: those
 reach an agent only through its tools. They stay within 8,000 characters and contain no braces.
 

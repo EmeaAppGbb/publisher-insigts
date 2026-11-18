@@ -63,7 +63,7 @@ format, in three parts:
 
 | Marker | Source line | IQ |
 | --- | --- | --- |
-| `[D1]` | `[D1] BooksOntology · <entity> · <key>` | Fabric IQ: ontology data |
+| `[D1]` | `[D1] BooksOntology · <entity> · <key>`, a line for each row cited from that question | Fabric IQ: ontology data, one marker per question asked |
 | `[F1]`, `[F1 §2]` | `[F1] <document title> · <section>` | Foundry IQ: an approved document, optionally its section |
 | `[Web1]` | `[Web1] <page title> · <site> · <URL>` | Web IQ: public context |
 | `[W1]` | `[W1] Outlook · <sender> · <date> · <subject> · <link>` | Work IQ: a mail message |

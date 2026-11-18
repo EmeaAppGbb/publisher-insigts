@@ -105,9 +105,11 @@ class EvalExpectationTests(unittest.TestCase):
                 self.assertEqual(first(cases["attention"], "excludes_by_week", week), [
                     money(row["opportunity_at_risk_gbp"]) for row in lake.rows("title_signals")
                     if row["is_material"] == "No" and row["opportunity_at_risk_gbp"]])
-                # One marker per material signal and per option: the minimum holds in every week.
-                self.assertLessEqual(cases["attention"]["min_markers"]["D"], len(signals))
-                self.assertEqual(cases["options-and-approver"]["min_markers"]["D"], len(options))
+                # The watchlist cites every material signal, and the brief every option, by its key.
+                self.assertEqual(sorted(cases["attention"]["source_keys_by_week"][week]),
+                                 sorted(row["signal_id"] for row in signals))
+                self.assertEqual(sorted(cases["options-and-approver"]["source_keys_by_week"][week]),
+                                 sorted(row["option_id"] for row in options.values()))
                 self.assertEqual(expedite["is_recommended"], "Yes")
                 self.assertEqual(first(cases["options-and-approver"], "includes_by_week", week),
                                  [money(expedite["investment_gbp"]), money(expedite["revenue_protected_gbp"])])
@@ -119,8 +121,6 @@ class EvalExpectationTests(unittest.TestCase):
                 self.assertNotIn(total, CASES["weeks"][week]["gbp"])
                 # The authority matrix sends an expedited reprint of this size to the publishing director.
                 self.assertLessEqual(expedite["investment_gbp"], 150000)
-        default = self.lakes[CASES["default_week"]].rows("title_signals")
-        self.assertEqual(cases["attention"]["min_markers"]["D"], sum(row["is_material"] == "Yes" for row in default))
         self.assertIn("| Expedited reprint | Up to £150,000 | Publishing director |", document("bks-gov-003"))
         self.assertIn("publishing director", cases["options-and-approver"]["includes"])
         policy = document("bks-pol-001")
@@ -151,8 +151,8 @@ class EvalExpectationTests(unittest.TestCase):
         for case in CASES["cases"]:
             with self.subTest(case=case["id"]):
                 self.assertIn(case["variant"], ("with_iq", "without_iq"))
-                self.assertLessEqual(set(case.get("includes_by_week", {})) | set(case.get("excludes_by_week", {})),
-                                     set(CASES["weeks"]))
+                self.assertLessEqual(set(case.get("includes_by_week", {})) | set(case.get("excludes_by_week", {}))
+                                     | set(case.get("source_keys_by_week", {})), set(CASES["weeks"]))
                 if case["variant"] == "without_iq":
                     self.assertEqual(case.get("tools"), "none")
 

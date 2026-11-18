@@ -264,16 +264,17 @@ def judge(case, run, week, data):
     for kind in case.get("markers", []):
         if not any(marker[0] == kind for marker in markers):
             problems.append(f"no [{kind}n] marker in the answer")
-    # One number per row, document, page or message: the app shows one source for each marker.
+    # An ontology question lists a line per row it cites; a document, page or message is one source.
     problems += [f"marker [{kind}{number}] names {count} sources" for (kind, number), count in sorted(lines.items())
-                 if count > 1]
-    for kind, least in (case.get("min_markers") or {}).items():
-        found = sum(marker[0] == kind for marker in markers)
-        if found < least:
-            problems.append(f"{found} [{kind}n] marker(s) for at least {least} sources")
+                 if count > 1 and kind != "D"]
+    cited = normalize(sources)
+    problems += [f"no Sources line cites {key}" for key in case.get("source_keys_by_week", {}).get(week, [])
+                 if normalize(key) not in cited]
     if case.get("no_markers") and (markers or listed):
         problems.append("source markers without tools")
     problems += [f"marker [{kind}{number}] has no Sources line" for kind, number in sorted(markers - listed)]
+    if "\u3010" in text:
+        problems.append("cites with Foundry's own \u3010…\u3011 markers")
     if text and steps is None and case.get("steps", True):
         problems.append("no Steps list")
     problems += [f"missing {item}" for item in includes(text, case.get("includes", []))
