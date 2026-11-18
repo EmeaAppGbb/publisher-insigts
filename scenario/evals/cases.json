@@ -37,7 +37,7 @@
   "cases": [
     {
       "id": "attention",
-      "about": "The watchlist: this week's material signals, from the live ontology only.",
+      "about": "The watchlist: this week's material signals only, as the live ontology marks them.",
       "variant": "with_iq",
       "question": "What needs my attention this week?",
       "tools": {
@@ -50,6 +50,10 @@
           ["3.1x", "3.1 x", "3.1 times"]
         ],
         "27": ["£179,827"]
+      },
+      "excludes_by_week": {
+        "26": ["£84,571"],
+        "27": ["£211"]
       }
     },
     {

@@ -101,13 +101,19 @@ class EvalExpectationTests(unittest.TestCase):
                             "27": [money(row["opportunity_at_risk_gbp"]) for row in signals
                                    if (row["title_name"], row["signal_type"]) == (title, "Inventory risk")]}[week]
                 self.assertEqual(first(cases["attention"], "includes_by_week", week), headline)
+                # A signal that isn't material isn't on the watchlist, so its amount at risk stays out of it.
+                self.assertEqual(first(cases["attention"], "excludes_by_week", week), [
+                    money(row["opportunity_at_risk_gbp"]) for row in lake.rows("title_signals")
+                    if row["is_material"] == "No" and row["opportunity_at_risk_gbp"]])
                 self.assertEqual(expedite["is_recommended"], "Yes")
                 self.assertEqual(first(cases["options-and-approver"], "includes_by_week", week),
                                  [money(expedite["investment_gbp"]), money(expedite["revenue_protected_gbp"])])
                 self.assertEqual(first(cases["no-total"], "includes_by_week", week),
                                  [money(expedite["investment_gbp"]), money(reallocate["investment_gbp"])])
-                self.assertEqual(first(cases["no-total"], "excludes_by_week", week),
-                                 [money(expedite["investment_gbp"] + reallocate["investment_gbp"])])
+                # Their total is no amount any row or document gives, so stating it is a calculation.
+                total = expedite["investment_gbp"] + reallocate["investment_gbp"]
+                self.assertEqual(first(cases["no-total"], "excludes_by_week", week), [money(total)])
+                self.assertNotIn(total, CASES["weeks"][week]["gbp"])
                 # The authority matrix sends an expedited reprint of this size to the publishing director.
                 self.assertLessEqual(expedite["investment_gbp"], 150000)
         self.assertIn("| Expedited reprint | Up to £150,000 | Publishing director |", document("bks-gov-003"))
@@ -119,13 +125,12 @@ class EvalExpectationTests(unittest.TestCase):
         self.assertEqual(cases["reprint-cover-policy"]["includes"],
                          ["28 days", policy.splitlines()[0].removeprefix("# ").casefold()])
 
-    def test_expected_amounts_are_given_and_excluded_ones_are_not(self):
+    def test_expected_amounts_are_ones_an_answer_may_state(self):
         for case in CASES["cases"]:
             for week in CASES["weeks"]:
                 allowed = {float(value) for value in CASES["weeks"][week]["gbp"]}
                 with self.subTest(case=case["id"], week=week):
                     self.assertLessEqual(amounts(" ".join(expected(case, "includes_by_week", week))), allowed)
-                    self.assertFalse(amounts(" ".join(expected(case, "excludes_by_week", week))) & allowed)
 
     def test_every_app_sample_question_has_a_case(self):
         samples = (ROOT / "app" / "src" / "samples.ts").read_text(encoding="utf-8")
