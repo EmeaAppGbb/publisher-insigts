@@ -5,7 +5,7 @@
 import type { ApprovalRequest, ToolCall, TurnOutcome } from '../live/protocol.ts'
 import { runTurn, type Send, type TurnLog } from '../live/turn.ts'
 import type { AgentClient, Session, Variant } from '../live/types.ts'
-import { SAMPLES } from '../samples.ts'
+import { SAMPLES, type SampleId } from '../samples.ts'
 
 export const MOCK_SESSION: Session = {
   mode: 'mock',
@@ -38,11 +38,10 @@ const NO_TOOLS = (what: string): Canned => ({
   ].join('\n'),
 })
 
-const [attention, options, policy, publicContext, mail] = SAMPLES.map((sample) => sample.question)
-
-// By sample question, then variant. The figures and keys are the seeded week's rows (2 November 2026).
-export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
-  [attention]: {
+// By sample, then variant. The figures and keys are the seeded week's rows (2 November 2026). The reprint request
+// plays the approval flow instead (MOCK_REPRINT).
+const CANNED: Readonly<Record<Exclude<SampleId, 'reprint'>, Record<Variant, Canned>>> = {
+  attention: {
     with_iq: {
       tools: [{
         server: 'fabric_iq_ontology', tool: 'ask_ontology',
@@ -70,7 +69,29 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
     },
     without_iq: NO_TOOLS('which titles need attention this week'),
   },
-  [options]: {
+  sales: {
+    with_iq: {
+      tools: [{
+        server: 'fabric_iq_ontology', tool: 'ask_ontology',
+        arguments: '{"question":"Which TitlePerformance rows have the TitleName value \\"The Glass Orchard\\"? Return each TitleId, UnitsThisWeek, WeekChangePct, UnitsLast4Weeks, ForecastLast4Weeks, ActualVsForecast, RevenueLast4WeeksGbp, TopTerritory, TopChannel, TopFormat, PortfolioRank and LiveCampaign."}',
+      }],
+      answer: [
+        '**The Glass Orchard is selling at 3.1x its forecast: 49,624 units in the last four weeks against 16,208 forecast, led by the UK.** [D1]',
+        '',
+        '- 13,217 units this week, up 3.7% on the week before, the portfolio\'s best seller [D1]',
+        '- Top territory UK, top channel Digital, top format Hardback [D1]',
+        '- £402,183 revenue in the last four weeks, with the Shortlist push campaign live [D1]',
+        '',
+        'Sources',
+        '- [D1] BooksOntology · TitlePerformance · title-001',
+        '',
+        'Steps',
+        '1. Fabric IQ ontology: asked for The Glass Orchard\'s TitlePerformance row; it returned its sales against forecast, where they come from and its live campaign.',
+      ].join('\n'),
+    },
+    without_iq: NO_TOOLS('how The Glass Orchard is selling against its forecast'),
+  },
+  options: {
     with_iq: {
       tools: [
         {
@@ -104,7 +125,36 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
     },
     without_iq: NO_TOOLS('The Glass Orchard\'s options or who may approve them'),
   },
-  [policy]: {
+  outcome: {
+    with_iq: {
+      tools: [
+        {
+          server: 'fabric_iq_ontology', tool: 'ask_ontology',
+          arguments: '{"question":"Which TitleSignal rows have the SignalType value \\"Inventory risk\\"? Return each SignalId, TitleName, Format, Territory, StockCoverDays, ReprintLeadTimeDays, OpportunityAtRiskGbp and Status."}',
+        },
+        {
+          server: 'fabric_iq_ontology', tool: 'ask_ontology',
+          arguments: '{"question":"Which ReprintRequest rows are there? Return each RequestId, TitleName, EditionId, Territory, Quantity, Expedited, ApproverName, ApprovedAt and Status."}',
+        },
+      ],
+      answer: [
+        "**One inventory risk is open and no reprint request is recorded yet: The Glass Orchard's UK hardback covers 24 days against a 35-day reprint lead time.** [D1]",
+        '',
+        '- The Glass Orchard · Hardback · UK · 24 days of cover · £84,571 at risk · Open [D1]',
+        '- Reprint requests: none recorded [D2]',
+        '',
+        'Sources',
+        '- [D1] BooksOntology · TitleSignal · sig-20261102-title-001-inv-ed-001-hb-uk',
+        '- [D2] BooksOntology · ReprintRequest · no rows',
+        '',
+        'Steps',
+        '1. Fabric IQ ontology: asked which TitleSignal rows have the SignalType value "Inventory risk"; it returned one open risk.',
+        '2. Fabric IQ ontology: asked for the ReprintRequest rows; it returned none.',
+      ].join('\n'),
+    },
+    without_iq: NO_TOOLS('which inventory risks are open or which reprint requests are recorded'),
+  },
+  policy: {
     with_iq: {
       tools: [{
         server: 'foundry_iq_knowledge', tool: 'knowledge_base_retrieve',
@@ -124,7 +174,25 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
     },
     without_iq: NO_TOOLS('what the reprint policy says'),
   },
-  [publicContext]: {
+  shortlists: {
+    with_iq: {
+      tools: [{
+        server: 'web_iq_public_context', tool: 'web',
+        arguments: '{"query":"literary prize shortlist effect on book sales","maxResults":3,"contentFormat":"passage","maxLength":1500}',
+      }],
+      answer: [
+        '**Public context, not company data:** trade coverage reports that a literary prize shortlist tends to lift a title\'s sales and media attention, with the largest lift for the eventual winner [Web1].',
+        '',
+        'Sources',
+        '- [Web1] How prize shortlists move book sales · example.com · https://example.com/prize-shortlists',
+        '',
+        'Steps',
+        '1. Web IQ public context: searched public coverage of how literary prize shortlists affect book sales, without any title, author or company detail; it returned one trade article.',
+      ].join('\n'),
+    },
+    without_iq: NO_TOOLS('public context on literary prize shortlists'),
+  },
+  romantasy: {
     with_iq: {
       tools: [{
         server: 'web_iq_public_context', tool: 'web',
@@ -142,7 +210,7 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
     },
     without_iq: NO_TOOLS('public context on romantasy readership'),
   },
-  [mail]: {
+  mail: {
     with_iq: {
       consent: 'work_iq_mail',
       tools: [{
@@ -168,6 +236,11 @@ export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
     without_iq: NO_TOOLS('what your mail says about The Glass Orchard'),
   },
 }
+
+// By sample question, in the samples' order.
+export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = Object.fromEntries(
+  SAMPLES.flatMap((sample) => (sample.id === 'reprint' ? [] : [[sample.question, CANNED[sample.id]]])),
+)
 
 const FALLBACK: Canned = {
   tools: [],

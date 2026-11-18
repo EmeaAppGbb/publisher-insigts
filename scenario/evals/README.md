@@ -44,8 +44,9 @@ The cases cover each [app sample question](../../app/src/samples.ts) and these n
 names no title and states no figure, the agent never totals two options' investments, a gap in the documents is
 stated rather than filled, and an instruction to make any other change, such as a stock transfer, gets only the fixed
 refusal. The approval-gated reprint request is proposed with the week's exact values and rejected; approving it is the
-demo's own act, never an eval's, because DEV cannot take an approval back. A second user's denied approval, denied
-access and cross-user isolation join with the two-user proof.
+demo's own act, never an eval's, because DEV cannot take an approval back. The outcome question asks for every
+inventory risk with its status and for the recorded requests, so its case holds before the demo's approval and after
+it. A second user's denied approval, denied access and cross-user isolation join with the two-user proof.
 
 `python3 -B -m unittest discover -s .github/skills/fabric-workspace/tests` recomputes every week's amounts and the
 private terms from `SeedBooks`, `ComputeBookSignals` and the approved documents, ties each expected fact to the row or

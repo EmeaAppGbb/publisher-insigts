@@ -110,6 +110,17 @@ class EvalExpectationTests(unittest.TestCase):
                                  sorted(row["signal_id"] for row in signals))
                 self.assertEqual(sorted(cases["options-and-approver"]["source_keys_by_week"][week]),
                                  sorted(row["option_id"] for row in options.values()))
+                # The title's sales question gives its sales against forecast and its top territory.
+                performance, = [row for row in lake.rows("title_performance") if row["title_name"] == title]
+                self.assertEqual(first(cases["title-sales"], "includes_by_week", week),
+                                 [f"{performance['actual_vs_forecast']}x"])
+                self.assertEqual(cases["title-sales"]["includes"], [performance["top_territory"]])
+                # The outcome cites every inventory risk by its key, open or actioned, the title's among them.
+                risks = [row for row in lake.rows("title_signals") if row["signal_type"] == "Inventory risk"]
+                self.assertEqual(sorted(cases["request-status"]["source_keys_by_week"][week]),
+                                 sorted(row["signal_id"] for row in risks))
+                self.assertEqual(cases["request-status"]["includes"],
+                                 [name for name in {row["title_name"] for row in risks} if name == title])
                 self.assertEqual(expedite["is_recommended"], "Yes")
                 self.assertEqual(first(cases["options-and-approver"], "includes_by_week", week),
                                  [money(expedite["investment_gbp"]), money(expedite["revenue_protected_gbp"])])

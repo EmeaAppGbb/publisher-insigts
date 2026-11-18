@@ -94,6 +94,21 @@
       ]
     },
     {
+      "id": "title-sales",
+      "about": "Why a title is moving: its sales against forecast and where they come from, from its TitlePerformance row.",
+      "variant": "with_iq",
+      "question": "How is The Glass Orchard selling against its forecast, and where?",
+      "tools": {
+        "required": ["fabric_iq_ontology"]
+      },
+      "markers": ["D"],
+      "includes": ["UK"],
+      "includes_by_week": {
+        "26": [["3.1x", "3.1 x", "3.1 times"]],
+        "27": [["3.3x", "3.3 x", "3.3 times"]]
+      }
+    },
+    {
       "id": "options-and-approver",
       "about": "A decision brief: each option's figures from its DecisionOption row and the approver from the authority matrix.",
       "variant": "with_iq",
@@ -136,6 +151,25 @@
       "about": "Genre context from Web IQ, queried in public terms only and labelled as public context.",
       "variant": "with_iq",
       "question": "What public context is there on romantasy readership trends?",
+      "tools": {
+        "required": ["web_iq_public_context"]
+      },
+      "markers": ["Web"],
+      "answer_includes": [
+        [
+          "public context, not company data",
+          "public context:",
+          "public context –",
+          "public context —",
+          "public context -"
+        ]
+      ]
+    },
+    {
+      "id": "shortlist-context",
+      "about": "The public context behind a title's momentum: how prize shortlists affect sales, queried in public terms only and labelled as public context.",
+      "variant": "with_iq",
+      "question": "What public context is there on how literary prize shortlists affect book sales?",
       "tools": {
         "required": ["web_iq_public_context"]
       },
@@ -212,6 +246,21 @@
         "I submitted the",
         "rr-2026"
       ]
+    },
+    {
+      "id": "request-status",
+      "about": "The outcome: every inventory risk with its status, open or actioned, and the reprint requests the ontology records, before an approval and after one.",
+      "variant": "with_iq",
+      "question": "Which inventory risks are open or actioned, and which reprint requests are recorded?",
+      "tools": {
+        "required": ["fabric_iq_ontology"]
+      },
+      "markers": ["D"],
+      "source_keys_by_week": {
+        "26": ["sig-20261102-title-001-inv-ed-001-hb-uk"],
+        "27": ["sig-20261109-title-001-inv-ed-001-hb-uk", "sig-20261109-title-004-inv-ed-004-hb-anz"]
+      },
+      "includes": ["The Glass Orchard"]
     },
     {
       "id": "read-only",
