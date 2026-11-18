@@ -132,6 +132,12 @@ class JudgeTests(unittest.TestCase):
                   "- [Web1] Page · example.com · https://example.com\n\nSteps\n1. Web IQ public context: searched.")
         good = call("web_iq_public_context", "web", {"query": "romantasy readership trends", "contentFormat": "passage"})
         self.assertEqual(self.judge("public-context", response(good, message(answer))), [])
+        # The label may be shortened, but the line must still be labelled as public context.
+        short = answer.replace("Public context, not company data:", "Public context:")
+        self.assertEqual(self.judge("public-context", response(good, message(short))), [])
+        unlabelled = answer.replace("Public context, not company data:", "Readers say")
+        self.assertTrue(any(problem.startswith("missing") for problem in
+                            self.judge("public-context", response(good, message(unlabelled)))))
         # Whole names, and the parts that still identify one: a surname, a short imprint or printer name, "&" as "and".
         for query in ("Glass Orchard sales", "mara ellison interview", "books by Saltmarsh & Vane", "Saltmarsh and Vane",
                       "Ember & Ash Kitchen reviews", "Ellison romantasy novel", "Calder Valley printing capacity",

@@ -140,7 +140,15 @@
         "required": ["web_iq_public_context"]
       },
       "markers": ["Web"],
-      "includes": ["public context, not company data"]
+      "answer_includes": [
+        [
+          "public context, not company data",
+          "public context:",
+          "public context –",
+          "public context —",
+          "public context -"
+        ]
+      ]
     },
     {
       "id": "no-total",

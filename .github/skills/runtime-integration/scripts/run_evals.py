@@ -277,6 +277,7 @@ def judge(case, run, week, data):
         problems.append("no Steps list")
     problems += [f"missing {item}" for item in includes(text, case.get("includes", []))
                  + includes(text, case.get("includes_by_week", {}).get(week, []))]
+    problems += [f"missing {item} in the answer" for item in includes(answer, case.get("answer_includes", []))]
     for item in case.get("excludes", []) + case.get("excludes_by_week", {}).get(week, []):
         if normalize(item) in normalize(text):
             problems.append(f'contains "{item}"')

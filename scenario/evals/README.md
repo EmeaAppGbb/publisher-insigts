@@ -33,7 +33,7 @@ A run is judged on its structure, not its wording:
 | `cases[].source_keys_by_week` | The row keys the *Sources* must cite for each week, such as each material signal's `SignalId` or each option's `OptionId`. |
 | `cases[].no_private_terms`, `no_figures` | The answer names no private term the question doesn't, or states no figure at all. |
 | `cases[].steps` | `false` for a reply that the instructions limit to one fixed sentence, which has no *Steps*. |
-| `cases[].includes`, `includes_by_week`, `excludes`, `excludes_by_week` | Text that must or must not appear, compared without case, apostrophe style or thousands separators; a list inside `includes` is satisfied by any one entry. |
+| `cases[].includes`, `includes_by_week`, `excludes`, `excludes_by_week`, `answer_includes` | Text that must or must not appear, compared without case, apostrophe style or thousands separators; a list inside `includes` is satisfied by any one entry. `answer_includes` must appear in the answer itself, before *Sources*, such as the public-context label. |
 | `cases[].requires` | `work_iq` for a case that needs the opt-in mail tool. |
 
 The cases cover each [app sample question](../../app/src/samples.ts) and these negative cases: the without-IQ agent
