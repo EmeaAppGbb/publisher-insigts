@@ -105,6 +105,9 @@ class EvalExpectationTests(unittest.TestCase):
                 self.assertEqual(first(cases["attention"], "excludes_by_week", week), [
                     money(row["opportunity_at_risk_gbp"]) for row in lake.rows("title_signals")
                     if row["is_material"] == "No" and row["opportunity_at_risk_gbp"]])
+                # One marker per material signal and per option: the minimum holds in every week.
+                self.assertLessEqual(cases["attention"]["min_markers"]["D"], len(signals))
+                self.assertEqual(cases["options-and-approver"]["min_markers"]["D"], len(options))
                 self.assertEqual(expedite["is_recommended"], "Yes")
                 self.assertEqual(first(cases["options-and-approver"], "includes_by_week", week),
                                  [money(expedite["investment_gbp"]), money(expedite["revenue_protected_gbp"])])
@@ -116,6 +119,8 @@ class EvalExpectationTests(unittest.TestCase):
                 self.assertNotIn(total, CASES["weeks"][week]["gbp"])
                 # The authority matrix sends an expedited reprint of this size to the publishing director.
                 self.assertLessEqual(expedite["investment_gbp"], 150000)
+        default = self.lakes[CASES["default_week"]].rows("title_signals")
+        self.assertEqual(cases["attention"]["min_markers"]["D"], sum(row["is_material"] == "Yes" for row in default))
         self.assertIn("| Expedited reprint | Up to £150,000 | Publishing director |", document("bks-gov-003"))
         self.assertIn("publishing director", cases["options-and-approver"]["includes"])
         policy = document("bks-pol-001")

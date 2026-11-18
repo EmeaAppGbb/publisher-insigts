@@ -40,9 +40,11 @@ def response(*items, status="completed"):
 ATTENTION = "\n".join([
     "**Five material signals: Northbound Signals has excess stock, The Glass Orchard sells at 3.1x its forecast and "
     "Salt and Starlight has momentum.** [D1] [D2] [D3]",
-    "", "- Northbound Signals · £47,200 exposure [D1]", "",
+    "", "- Northbound Signals · £47,200 exposure [D1]", "- Northbound Signals · 0.5x [D4]",
+    "- Salt and Starlight · search interest up 109% [D5]", "",
     "Sources", "- [D1] BooksOntology · TitleSignal · a", "- [D2] BooksOntology · TitleSignal · b",
-    "- [D3] BooksOntology · TitleSignal · c", "",
+    "- [D3] BooksOntology · TitleSignal · c", "- [D4] BooksOntology · TitleSignal · d",
+    "- [D5] BooksOntology · TitleSignal · e", "",
     "Steps", "1. Fabric IQ ontology: asked for the material TitleSignal rows.",
 ])
 ONTOLOGY = call("fabric_iq_ontology", "ask_ontology", {"question": 'Which TitleSignal rows have the IsMaterial value "Yes"?'})
@@ -86,8 +88,22 @@ class JudgeTests(unittest.TestCase):
         unlisted = ATTENTION.replace("- [D3] BooksOntology · TitleSignal · c\n", "")
         self.assertIn("marker [D3] has no Sources line", self.judge("attention", response(ONTOLOGY, message(unlisted))))
         self.assertIn("no Steps list", self.judge("attention", response(ONTOLOGY, message(ATTENTION.split("Steps")[0]))))
-        unmarked = ATTENTION.replace(" [D1] [D2] [D3]", "").replace(" [D1]", "")
+        unmarked = ATTENTION.replace(" [D1] [D2] [D3]", "").replace(" [D1]", "").replace(" [D4]", "").replace(" [D5]", "")
+        three = ATTENTION.replace(" [D4]", "").replace(" [D5]", "")
+        self.assertIn("3 [Dn] marker(s) for at least 5 sources", self.judge("attention", response(ONTOLOGY, message(three))))
         self.assertIn("no [Dn] marker in the answer", self.judge("attention", response(ONTOLOGY, message(unmarked))))
+
+    def test_each_marker_names_one_source(self):
+        # Three options cited as [D1] with one Sources line each: the app could show only one of them.
+        shared = "\n".join([
+            "**The expedited reprint is recommended.** [D1] The publishing director approves it [F1 §1].", "",
+            "- Expedited reprint · £50,000 [D1]", "- Standard reprint · £67,200 [D1]", "- Reallocation · £2,597 [D1]", "",
+            "Sources", "- [D1] BooksOntology · DecisionOption · a", "- [D1] BooksOntology · DecisionOption · b",
+            "- [F1] Decision authority matrix · §1", "", "Steps", "1. Asked.", "2. Retrieved."])
+        knowledge = call("foundry_iq_knowledge", "knowledge_base_retrieve", {"queries": ["approver"]})
+        problems = self.judge("options-and-approver", response(ONTOLOGY, knowledge, message(shared)))
+        self.assertIn("marker [D1] names 2 sources", problems)
+        self.assertIn("1 [Dn] marker(s) for at least 3 sources", problems)
 
     def test_expected_facts_follow_the_week(self):
         week_27 = evals.judge(CASES["attention"], {"http_status": 200, **evals.parse_response(

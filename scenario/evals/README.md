@@ -8,7 +8,8 @@ A run is judged on its structure, not its wording:
 
 - **Tools.** The tools a case requires ran and returned without an error; the without-IQ agent called none.
 - **Sources.** The answer carries the expected source markers (`[D1]` ontology data, `[F1]` an approved document,
-  `[Web1]` public context, `[W1]` mail), and each marker has a line under *Sources*. A *Steps* list follows.
+  `[Web1]` public context, `[W1]` mail), and each marker has exactly one line under *Sources*, because the app
+  shows one source per marker. A *Steps* list follows.
 - **Facts.** The answer contains the case's expected names and figures for the as-of week, and none of its excluded
   ones.
 - **No invented amounts.** Every amount in pounds, outside a line that cites public context, is one that the week's
@@ -28,6 +29,7 @@ A run is judged on its structure, not its wording:
 | `cases[].variant`, `question` | The agent asked and the question, as the app's samples ask it. |
 | `cases[].tools` | `required` (and `forbidden`) MCP server labels, or `"none"`. |
 | `cases[].markers`, `no_markers` | Marker kinds the answer must carry, or none at all. |
+| `cases[].min_markers` | The fewest markers of a kind, one for each row the answer must cite, such as each material signal or each option. |
 | `cases[].no_private_terms`, `no_figures` | The answer names no private term the question doesn't, or states no figure at all. |
 | `cases[].steps` | `false` for a reply that the instructions limit to one fixed sentence, which has no *Steps*. |
 | `cases[].includes`, `includes_by_week`, `excludes`, `excludes_by_week` | Text that must or must not appear, compared without case, apostrophe style or thousands separators; a list inside `includes` is satisfied by any one entry. |

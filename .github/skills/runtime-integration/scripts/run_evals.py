@@ -13,6 +13,7 @@ access or isolation, and models vary between runs.
 """
 
 import argparse
+import collections
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -258,10 +259,18 @@ def judge(case, run, week, data):
             problems.append("the Web IQ call did not ask for passage content")
     answer, sources, steps = sections(text)
     markers = {(kind, number) for kind, number in MARKER.findall(answer)}
-    listed = {(kind, number) for kind, number in SOURCE_LINE.findall(sources)}
+    lines = collections.Counter(SOURCE_LINE.findall(sources))
+    listed = set(lines)
     for kind in case.get("markers", []):
         if not any(marker[0] == kind for marker in markers):
             problems.append(f"no [{kind}n] marker in the answer")
+    # One number per row, document, page or message: the app shows one source for each marker.
+    problems += [f"marker [{kind}{number}] names {count} sources" for (kind, number), count in sorted(lines.items())
+                 if count > 1]
+    for kind, least in (case.get("min_markers") or {}).items():
+        found = sum(marker[0] == kind for marker in markers)
+        if found < least:
+            problems.append(f"{found} [{kind}n] marker(s) for at least {least} sources")
     if case.get("no_markers") and (markers or listed):
         problems.append("source markers without tools")
     problems += [f"marker [{kind}{number}] has no Sources line" for kind, number in sorted(markers - listed)]
