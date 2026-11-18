@@ -497,7 +497,7 @@ class TeardownTests(unittest.TestCase):
     def test_snapshot_preserves_only_cleanup_identifiers_and_survives_partial_destroy(self):
         ctx = self.context()
         foundry = f"/subscriptions/{self.SUBSCRIPTION}/resourceGroups/rg-demo/providers/Microsoft.CognitiveServices/accounts/ai-demo"
-        agents = {key: {"name": f"demo-{key.replace('_', '-')}", "display_name": "Scenario assistant",
+        agents = {key: {"name": f"demo-{key.replace('_', '-')}", "display_name": "Book performance assistant",
                         "source": source} for key, source in deploy.foundry.VARIANTS.items()}
         state = {"values": {"root_module": {"resources": [
             {"address": "azapi_resource.foundry", "mode": "managed",
@@ -2374,8 +2374,8 @@ class FakeFoundry(FakeHttp):
 class AgentAndAppTests(unittest.TestCase):
     ENDPOINT = "https://ai-demo.services.ai.azure.com/api/projects/demo"
     SEARCH = "https://srch.search.windows.net"
-    AGENTS = {"with_iq": ("demo-with-iq", "Scenario assistant – with IQ"),
-              "without_iq": ("demo-without-iq", "Scenario assistant – without IQ")}
+    AGENTS = {"with_iq": ("demo-with-iq", "Book performance assistant – with IQ"),
+              "without_iq": ("demo-without-iq", "Book performance assistant – without IQ")}
     WITH_IQ_TOOLS = ["fabric_iq_ontology", "foundry_iq_knowledge", "web_iq_public_context", "work_iq_mail"]
     REGISTRY = "crdemoab12"
     APP_URL = "https://ca-demo.blue-sea-123.swedencentral.azurecontainerapps.io"

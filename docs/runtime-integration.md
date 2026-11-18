@@ -132,8 +132,8 @@ an approved design, not a retry loop.
 
 | Variant | Agent name | Definition | Tools |
 | --- | --- | --- | --- |
-| Scenario assistant – with IQ | `<project_name>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ, Foundry IQ, Web IQ and, with Work IQ, Work IQ mail |
-| Scenario assistant – without IQ | `<project_name>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
+| Book performance assistant – with IQ | `<project_name>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ, Foundry IQ, Web IQ and, with Work IQ, Work IQ mail |
+| Book performance assistant – without IQ | `<project_name>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
 
 The variants share a byte-identical `agent.json` (the model deployment, reasoning
 effort and description) and `instructions.md`; only their `tools/` differ.
@@ -196,13 +196,13 @@ asked.
 
 `ask_ontology` answers in prose with a table of the properties a question names.
 A question across several entities, or a widened one such as everything related to
-an asset, can fail after 60–80 seconds with "Invalid JSON response from remote MCP
+a title, can fail after 60–80 seconds with "Invalid JSON response from remote MCP
 server" and an empty reply; a larger derived ontology showed this even on a warm
 capacity. So the tool description asks one question about the rows of one entity,
 naming the properties it needs and quoting each value: unquoted, Fabric can read a
-bare value as an empty one. The sample's question asks for `Asset` rows with each
-asset's site through `LocatedAt`; if it fails in your tenant, ask about one entity
-only. Fabric returns only the rows the user may read.
+bare value as an empty one. The sample's questions ask for the `TitleSignal` rows
+whose `IsMaterial` value is "Yes", or a title's `DecisionOption` rows, each with its
+key for the citation. Fabric returns only the rows the user may read.
 
 ### Foundry IQ knowledge
 
@@ -237,7 +237,7 @@ server, `https://workiq.svc.cloud.microsoft/mcp`, through the project connection
   `offline_access`. The app neither requests nor forwards it.
 - **Read-only.** Work IQ's MCP server also offers tools that create, change or act.
   The tool allows only `fetch`, and its description allows one fixed path:
-  `/me/messages?$search="<asset name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
+  `/me/messages?$search="<title name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
 - **Mail must be indexed.** Work IQ finds only mail in the user's own mailbox, after
   Microsoft 365 has indexed it. Put sample mail into that mailbox at least a day
   before you rely on it.
@@ -286,10 +286,11 @@ knowledge base, so no document question can trigger a web search.
   3000 for such a profile.
 - **Public-only queries.** The identity is the project's, not the user's, so only
   instructions keep private data out: the tool description and the agent's
-  instructions allow public, general context, such as a manufacturer's guidance
-  about a type of equipment, and never a site, asset or person's name. The agent
-  labels the line "Public context, not company guidance". Check the query in the
-  app's tool timeline when you test.
+  instructions allow public, general context, such as readership trends in a genre,
+  and never a title, author, imprint, printer, retailer, person's name or company
+  figure. The agent labels the line "Public context, not company data". Check the
+  query in the app's tool timeline when you test; the [evals](../scenario/evals/README.md)
+  check every query against the portfolio's names.
 - **Verification.** `verify` makes no Web IQ call. It checks the account, that the
   `web-iq` connection targets Web IQ's MCP server as the project identity with no
   key, and your `--web-iq-bound` confirmation for the project identity's client ID,
@@ -411,8 +412,9 @@ tool consent.
 | Agents | Each agent's latest version carries the reviewed definition's digest | `agent` phase |
 | App | `/healthz` answers 200, and `/api/config` serves this deployment's client ID | `app` phase |
 | Browser sign-in | A person signs in at the app URL, asks with IQ and without, and continues with a follow-up | You |
-| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (The Glass Orchard's forecast variance), a cited starter-document passage, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
+| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (The Glass Orchard's forecast variance), a cited passage of an approved document, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
 | Replies | Each answer carries a marker after each fact, then *Sources* and *Steps*, and shows the run's response ID | You |
+| Evals | Every [scenario eval](../scenario/evals/README.md) for the deployed week passes as you: the required tool calls without errors, markers with *Sources* lines, the expected facts, amounts in pounds only from the week's rows or the approved documents, and Web IQ queries in public terms | [`run_evals.py`](../.github/skills/runtime-integration/scripts/run_evals.py) |
 | Authorization | Missing consent, an expired sign-in, a missing Foundry role (HTTP 403) or denied Fabric access is an explicit failure, never an answer from another source | You, with a second account |
 | Isolation | A second user can't continue or read the first user's conversation through its response ID, or reach their mail | You, with a second account |
 | Repeatability | Rerunning `up` publishes, builds and changes nothing | A rerun of `up` |
@@ -497,12 +499,13 @@ agent="$(terraform -chdir=infra output -json foundry_agents | jq -r .without_iq.
 az rest --method post --resource https://ai.azure.com \
   --url "$endpoint/openai/v1/responses" \
   --headers Content-Type=application/json \
-  --body "{\"agent_reference\": {\"type\": \"agent_reference\", \"name\": \"$agent\"}, \"input\": \"Which assets are in maintenance?\"}" \
+  --body "{\"agent_reference\": {\"type\": \"agent_reference\", \"name\": \"$agent\"}, \"input\": \"What needs my attention this week?\"}" \
   --query "output[?type=='message'].content[].text" --output tsv
 ```
 
 If that answers but the app fails, look at the app, its settings or the sign-in
-registration. Agent and app changes are published the same way: commit, then rerun
+registration. To ask every [scenario eval](../scenario/evals/README.md) the same way and
+judge the runs, use [`run_evals.py`](../.github/skills/runtime-integration/scripts/run_evals.py). Agent and app changes are published the same way: commit, then rerun
 `up`.
 
 ## Troubleshooting

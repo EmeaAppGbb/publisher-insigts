@@ -61,9 +61,9 @@ jobs:
         run: python -B -m unittest discover -s .github/skills/deploy-platform/tests
       - name: Agent definitions (shared files byte-identical, tools read-only and allowlisted)
         run: python -B .github/skills/deploy-platform/scripts/foundry_agent.py validate
-      - name: Runtime preflight tests
+      - name: Runtime preflight and eval runner tests
         run: python -B -m unittest discover -s .github/skills/runtime-integration/tests
-      - name: Fabric notebook tests (offline binder, seeder, signals and document publisher)
+      - name: Fabric notebook and eval expectation tests (offline)
         run: python -B -m unittest discover -s .github/skills/fabric-workspace/tests
 
   app:

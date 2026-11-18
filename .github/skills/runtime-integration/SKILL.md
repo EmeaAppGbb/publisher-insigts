@@ -75,14 +75,23 @@ keyless Web IQ wiring, without a Web IQ call, its
 checks the deployed app's health and sign-in settings. None of them asks the agents
 a question. For the remaining gates in `docs/runtime-integration.md`:
 
+- **Evals.** From the deployment checkout, run
+  `python3 .github/skills/runtime-integration/scripts/run_evals.py` (with `--week 27`
+  after the demo advances a week). It asks every case in `scenario/evals/cases.json`
+  as the Azure CLI user and judges each run's tool calls, markers, expected facts,
+  amounts in pounds and Web IQ queries. Exit code 3 means a tool needs this user's
+  consent: give the user the printed link to open and accept, then rerun. Read failures
+  in the owner-only `.artifacts/evals/` evidence. A pass covers one user's agent route,
+  not the app's sign-in or isolation.
+
 - **Browser sign-in.** The user signs in at the `app` output's URL, asks the sample
   question with IQ, accepts the Fabric IQ consent card once, asks again and gets
   The Glass Orchard and its forecast variance with a `[D1]` marker; then compares with **Ask both** and
   asks a follow-up. The runner's CLI token does not prove the app's registration,
   its consent or the redirect bridge.
 - **Sources.** Decide from the tool timeline, not answer text: the Fabric IQ call
-  must return live rows as the user, the Foundry IQ call a cited starter-document
-  passage, the Web IQ query public terms only and, with Work IQ, the mail `fetch`
+  must return live rows as the user, the Foundry IQ call a cited passage of an
+  approved document, the Web IQ query public terms only and, with Work IQ, the mail `fetch`
   the user's own mail. Never accept a `starter.txt` fact as live ontology evidence.
 - **End-user authorization.** With an explicitly approved second account, confirm
   that a user without a Foundry role receives HTTP 403, and that a user with the

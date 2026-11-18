@@ -31,7 +31,7 @@ export function Composer({ blocked, onAsk }: ComposerProps) {
     <section className="composer" aria-labelledby={`${id}-label`}>
       <form onSubmit={submit}>
         <label id={`${id}-label`} htmlFor={`${id}-question`} className="composer-label">
-          Ask about the sample’s sites and assets
+          Ask about the fictional book portfolio
         </label>
         <textarea
           id={`${id}-question`}
@@ -40,7 +40,7 @@ export function Composer({ blocked, onAsk }: ComposerProps) {
           onKeyDown={onKeyDown}
           maxLength={QUESTION_LIMIT}
           rows={3}
-          placeholder="Which assets are in maintenance, and at which site?"
+          placeholder="Which titles need attention this week, and why?"
           aria-describedby={`${id}-hint`}
         />
         <div className="composer-bar">

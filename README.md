@@ -32,7 +32,7 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 | [`workspace/`](workspace/) | Fabric items: lakehouse, seed, signal, bind and document-publishing notebooks, ontology and bootstrap plan. |
 | [`agents/`](agents/README.md) | The two Foundry prompt agent variants: shared `agent.json` and `instructions.md`, and the with-IQ variant's `tools/`. |
 | [`app/`](app/README.md) | The Container Apps web app: the React page, the Node server that verifies each user's token and asks the agents, and its image. |
-| [`scenario/`](scenario/data/README.md) | The book performance scenario: its data contract and [approved documents](scenario/knowledge/README.md), and later its workflow rules and evaluations ([contract](docs/scenario-authoring.md)). |
+| [`scenario/`](scenario/data/README.md) | The book performance scenario: its data contract, [approved documents](scenario/knowledge/README.md) and [evals](scenario/evals/README.md), and later its workflow rules ([contract](docs/scenario-authoring.md)). |
 | [`cicd/`](cicd/README.md) | Native Fabric bootstrap and promotion. |
 | [`docs/`](docs/getting-started.md) | Guides, starting with getting started. |
 | [`.github/skills/`](.github/skills/) | Copilot skills that run each workflow. |

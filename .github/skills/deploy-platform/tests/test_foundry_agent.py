@@ -13,7 +13,7 @@ import foundry_agent as foundry  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 VALUES = {
-    "agent_display_name": "Scenario assistant – with IQ", "agent_model_deployment": "agent",
+    "agent_display_name": "Book performance assistant – with IQ", "agent_model_deployment": "agent",
     "agent_reasoning_effort": "low",
     "knowledge_base_mcp_endpoint": "https://srch.search.windows.net/knowledgebases/demo-knowledge/mcp?api-version=v1",
     "knowledge_base_connection": "knowledge-base",
@@ -29,8 +29,10 @@ WITH_IQ = REPO / foundry.VARIANTS["with_iq"]
 # Any source marker, such as [D1], [F1 §2] or [Web1].
 MARKER = re.compile(r"\[([A-Za-z]+)\d+(?:\s*§\s*[\w.-]+)?\]")
 # The sample's facts reach an agent only through its tools: the without-IQ variant shares the instructions.
-SAMPLE_FACTS = ("Pump", "Conveyor", "North Works", "South Works", "demo-site", "demo-asset", "Operational",
-                "Maintenance", "starter.txt")
+# Policy values stay in the approved documents, which only the with-IQ agent retrieves.
+SAMPLE_FACTS = ("The Glass Orchard", "Northbound Signals", "Salt and Starlight", "Mara Ellison", "Harrowgate Lane",
+                "Brindle Print Works", "Calder Valley", "title-00", "ed-00", "sig-20", "bks-", "starter.txt",
+                "£100,000", "£150,000", "28 days", "120 days", "Publishing director", "Head of production planning")
 
 
 class FoundryAgentTests(unittest.TestCase):
@@ -50,7 +52,7 @@ class FoundryAgentTests(unittest.TestCase):
             self.assertEqual((definition["kind"], definition["model"], definition["reasoning"]),
                              ("prompt", "agent", {"effort": "low"}))
             self.assertEqual(definition["instructions"], (REPO / source / "instructions.md").read_text(encoding="utf-8"))
-            self.assertEqual(body["description"], "Scenario assistant – with IQ")
+            self.assertEqual(body["description"], "Book performance assistant – with IQ")
             self.assertEqual(body["metadata"], {foundry.DIGEST_KEY: foundry.digest(body), "source": source.split("/")[1],
                                                 "variant": variant})
             # Tools authenticate through their connections: no headers and no per-request inputs.
@@ -73,7 +75,7 @@ class FoundryAgentTests(unittest.TestCase):
     def test_the_mail_tool_reads_one_search_of_the_users_mail(self):
         # Work IQ's server also offers tools that act: the tool allows only fetch, of one fixed search.
         mail = json.loads((WITH_IQ / "tools" / "WorkIQMail.json").read_text(encoding="utf-8"))
-        self.assertIn('exactly this one path for the asset\'s name: /me/messages?$search="<asset name>"'
+        self.assertIn('exactly this one path for the title\'s name: /me/messages?$search="<title name>"'
                       "&$select=subject,from,receivedDateTime,webLink,body&$top=10 ", mail["server_description"])
         self.assertIn("never ask it to send, reply, schedule or change anything", mail["server_description"])
 
@@ -184,7 +186,7 @@ class FoundryAgentTests(unittest.TestCase):
         self.assertLessEqual(len(text.strip()), 8000)
         self.assertNotRegex(text, r"[{}]")
         self.assertEqual({match.group(1) for match in MARKER.finditer(text)}, {"D", "F", "Web", "W"})
-        for line in ("- [D1] ScenarioOntology · <entity> · <key>", "- [F1] <document title> · <section>",
+        for line in ("- [D1] BooksOntology · <entity> · <key>", "- [F1] <document title> · <section>",
                      "- [Web1] <page title> · <site> · <URL>",
                      "- [W1] Outlook · <sender> · <date> · <subject> · <link>"):
             self.assertIn(f"\n{line}\n", text)

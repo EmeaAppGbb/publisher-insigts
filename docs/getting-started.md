@@ -446,8 +446,8 @@ explains the identity flow, access model and evidence.
 
 | Variant | Agent name | Definition | Tools |
 | --- | --- | --- | --- |
-| Scenario assistant – with IQ | `<project>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ ontology, as the user; Foundry IQ knowledge and Web IQ public context, as the project; Work IQ mail, as the user, only with `work_iq_enabled` |
-| Scenario assistant – without IQ | `<project>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
+| Book performance assistant – with IQ | `<project>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ ontology, as the user; Foundry IQ knowledge and Web IQ public context, as the project; Work IQ mail, as the user, only with `work_iq_enabled` |
+| Book performance assistant – without IQ | `<project>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
 
 Both share a byte-identical `agent.json` (the model deployment and reasoning
 effort) and `instructions.md`; only their tools differ, so the app can compare an
@@ -496,6 +496,9 @@ your work account:
 3. Select **Ask both** to compare the answer with IQ against the one without, and
    ask a follow-up to continue the same conversation. A live answer can take a
    minute; the server waits at most 225 seconds.
+4. Ask the other sample questions, or run the [scenario evals](../scenario/evals/README.md)
+   from the deployment checkout, which ask every case as you and judge the tool calls,
+   sources and figures: `python3 .github/skills/runtime-integration/scripts/run_evals.py`.
 
 This proves the route for your account only. Other users need an operator to grant
 them a Foundry role and Fabric access from the

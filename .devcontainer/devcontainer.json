@@ -29,11 +29,11 @@
   ],
   "portsAttributes": {
     "3000": {
-      "label": "Scenario assistant (npm run dev)",
+      "label": "Book performance assistant (npm run dev)",
       "onAutoForward": "notify"
     },
     "8080": {
-      "label": "Scenario assistant app image (docker run)",
+      "label": "Book performance assistant app image (docker run)",
       "onAutoForward": "silent"
     }
   },

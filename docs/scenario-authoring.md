@@ -25,7 +25,7 @@ for the native work-package order.
 | `scenario/data/` | Versioned domain/table contracts, deterministic synthetic generation and small fictional fixtures. | Real tenant/customer data or evaluation answers destined for indexing. |
 | `scenario/knowledge/` | Reviewed authoritative document sources, with IDs, versions, scope and effective dates. | Raw fixture bundles, temporary exports, golden answers or mirrored mailboxes. |
 | `scenario/workflows/` | Independently testable scenario-specific rules, transformations and approved tool logic. | An undeclared backend or a second source of authoritative facts. |
-| `scenario/evals/` | Expected outcomes, source/citation requirements, negative cases and scenario checks. | Content published to a lakehouse Files corpus. |
+| `scenario/evals/` | Expected outcomes, source/citation requirements, negative cases and scenario checks, such as the books scenario's [cases](../scenario/evals/README.md), which `run_evals.py` asks the live agents. | Content published to a lakehouse Files corpus. |
 | `agents/<variant>/` | Each variant's `agent.json` and `instructions.md`, byte-identical across variants, and its `tools/*.json` MCP tools, whose `{{placeholders}}` the runner fills from Terraform outputs. | Rendered definitions, physical IDs, access tokens, tenant IDs, deployment receipts, headers or credentials, tools that need approval or an empty allow-list. |
 | `app/` | The web app: the page in `src/`, its agent layer in `src/live/`, the token-verifying server in `server/`, its tests and `Dockerfile`. Sign-in settings come from `/api/config`. | Credentials or app-only tokens, raw browser calls to Azure/Fabric, server-built prompts, or calls to anything but the configured project and agents. |
 | `docs/`, `.github/skills/` | Canonical product explanations and repeatable procedures, respectively. | Session diaries or competing setup guides. |
@@ -169,9 +169,10 @@ publishes them. For a scenario, change:
   [`app/src/live/reply.ts`](../app/src/live/reply.ts), its tests and the mock answers
   in [`app/src/mock/client.ts`](../app/src/mock/client.ts)
   ([reply format](architecture.md#reply-format)).
-- **The sample questions** in [`app/src/samples.ts`](../app/src/samples.ts), and the
-  runner's readiness questions and expected facts in its `SCENARIO` descriptor
-  when the seed data changes.
+- **The sample questions** in [`app/src/samples.ts`](../app/src/samples.ts), a case
+  for each in [`scenario/evals/`](../scenario/evals/README.md), and the runner's
+  readiness questions and expected facts in its `SCENARIO` descriptor when the seed
+  data changes.
 
 A definition may use only the runner's placeholders: `agent_display_name`,
 `agent_model_deployment`, `agent_reasoning_effort`, `knowledge_base_mcp_endpoint`,

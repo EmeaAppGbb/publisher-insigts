@@ -22,7 +22,7 @@ export function Header({ session, onSignIn, onSignOut }: HeaderProps) {
     <header className="topbar">
       <div className="brand">
         <Logo />
-        <h1>Scenario assistant</h1>
+        <h1>Book performance assistant</h1>
         {session?.notice && <span className="badge">{session.notice}</span>}
       </div>
       {session?.mode === 'live' && (

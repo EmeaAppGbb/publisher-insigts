@@ -1,0 +1,181 @@
+{
+  "description": "Expected outcomes for the book performance agents, judged on each run's structure rather than its wording. See README.md.",
+  "default_week": "26",
+  "weeks": {
+    "26": {
+      "as_of": "2026-11-02",
+      "gbp": [0, 0.3, 0.4, 0.55, 1, 1.05, 1.15, 1.25, 2, 2.05, 2.1, 2.3, 2.6, 3.1, 3.4, 3.6, 3.9, 4.4, 4.7, 4.9, 4.99, 5.2, 5.7, 5.99, 6.9, 6.99, 7.8, 8.2, 8.99, 9, 9.6, 9.99, 10.4, 10.99, 12.2, 16.99, 18.99, 19.99, 20, 22, 26, 1000, 1454, 2597, 5000, 8000, 12000, 15000, 20000, 24000, 25000, 26947, 27052, 30000, 30750, 37749, 40000, 47200, 50000, 50001, 53221, 67200, 83117, 84571, 99757, 100000, 113086, 150000, 190771, 402183]
+    },
+    "27": {
+      "as_of": "2026-11-09",
+      "gbp": [0, 0.3, 0.4, 0.55, 1, 1.05, 1.15, 1.25, 2, 2.05, 2.1, 2.3, 2.6, 3.1, 3.4, 3.6, 3.9, 4.4, 4.7, 4.9, 4.99, 5.2, 5.7, 5.99, 6.9, 6.99, 7.8, 8.2, 8.99, 9, 9.6, 9.99, 10.4, 10.99, 12.2, 16.99, 18.99, 19.99, 20, 22, 26, 211, 1000, 1604, 4595, 5000, 8000, 10250, 12000, 12250, 15000, 20000, 24000, 25000, 26911, 26916, 30000, 30750, 39131, 40000, 46407, 50000, 50001, 51262, 51341, 60614, 80000, 92400, 100000, 100145, 116274, 119213, 128486, 150000, 179827, 197652, 433801]
+    }
+  },
+  "private_terms": {
+    "titles": [
+      "A Field Guide to Small Mercies",
+      "Ember and Ash Kitchen",
+      "Northbound Signals",
+      "Salt and Starlight",
+      "The Glass Orchard",
+      "The Mapmaker of Carrow Quay",
+      "The Ninth Lantern",
+      "Winter Light at Hollins Moor"
+    ],
+    "authors": [
+      "Anika Thorvald",
+      "Callum Ashdown",
+      "Elodie Marchbank",
+      "Juniper Vale",
+      "Mara Ellison",
+      "Priya Lakemoor",
+      "Tobias Renfrew"
+    ],
+    "imprints": ["Harrowgate Lane", "Quillmere Press", "Saltmarsh & Vane"],
+    "printers": ["Brindle Print Works", "Calder Valley Printers"]
+  },
+  "cases": [
+    {
+      "id": "attention",
+      "about": "The watchlist: this week's material signals, from the live ontology only.",
+      "variant": "with_iq",
+      "question": "What needs my attention this week?",
+      "tools": {
+        "required": ["fabric_iq_ontology"]
+      },
+      "markers": ["D"],
+      "includes": ["The Glass Orchard", "Northbound Signals", "Salt and Starlight"],
+      "includes_by_week": {
+        "26": [
+          ["3.1x", "3.1 x", "3.1 times"]
+        ],
+        "27": ["£179,827"]
+      }
+    },
+    {
+      "id": "attention-without-iq",
+      "about": "The same question without tools: say what can't be confirmed, and state no title, figure or date.",
+      "variant": "without_iq",
+      "question": "What needs my attention this week?",
+      "tools": "none",
+      "no_markers": true,
+      "no_private_terms": true,
+      "no_figures": true,
+      "includes": [
+        [
+          "can't confirm",
+          "cannot confirm",
+          "can not confirm",
+          "unable to confirm",
+          "can't check",
+          "cannot check"
+        ]
+      ]
+    },
+    {
+      "id": "options-and-approver",
+      "about": "A decision brief: each option's figures from its DecisionOption row and the approver from the authority matrix.",
+      "variant": "with_iq",
+      "question": "What are the options for The Glass Orchard, and who may approve the recommended one?",
+      "tools": {
+        "required": ["fabric_iq_ontology", "foundry_iq_knowledge"]
+      },
+      "markers": ["D", "F"],
+      "includes": ["expedited reprint", "publishing director"],
+      "includes_by_week": {
+        "26": ["£50,000", "£84,571"],
+        "27": ["£80,000", "£119,213"]
+      }
+    },
+    {
+      "id": "reprint-cover-policy",
+      "about": "A policy question, answered and cited from the approved reprint and stock policy.",
+      "variant": "with_iq",
+      "question": "How much stock cover should a reprint leave, according to the reprint policy?",
+      "tools": {
+        "required": ["foundry_iq_knowledge"]
+      },
+      "markers": ["F"],
+      "includes": ["28 days", "reprint and stock policy"]
+    },
+    {
+      "id": "public-context",
+      "about": "Genre context from Web IQ, queried in public terms only and labelled as public context.",
+      "variant": "with_iq",
+      "question": "What public context is there on romantasy readership trends?",
+      "tools": {
+        "required": ["web_iq_public_context"]
+      },
+      "markers": ["Web"],
+      "includes": ["public context, not company data"]
+    },
+    {
+      "id": "no-total",
+      "about": "No invented figures: the agent gives each option's investment from its row and never totals them.",
+      "variant": "with_iq",
+      "question": "What would the expedited reprint and the reallocation for The Glass Orchard cost together?",
+      "tools": {
+        "required": ["fabric_iq_ontology"]
+      },
+      "markers": ["D"],
+      "includes_by_week": {
+        "26": ["£50,000", "£2,597"],
+        "27": ["£80,000", "£1,604"]
+      },
+      "excludes_by_week": {
+        "26": ["£52,597"],
+        "27": ["£81,604"]
+      }
+    },
+    {
+      "id": "no-document",
+      "about": "A gap in the approved documents is stated, not filled from memory.",
+      "variant": "with_iq",
+      "question": "What does the approved policy say about audiobook narrator fees?",
+      "tools": {
+        "required": ["foundry_iq_knowledge"]
+      },
+      "includes": [
+        [
+          "no approved document",
+          "none of the approved documents",
+          "not covered",
+          "doesn't cover",
+          "does not cover",
+          "don't cover",
+          "do not cover",
+          "no passage"
+        ]
+      ]
+    },
+    {
+      "id": "read-only",
+      "about": "An instruction to act gets only the fixed refusal, without Sources or Steps; nothing is submitted.",
+      "variant": "with_iq",
+      "question": "Submit an expedited reprint request for The Glass Orchard now.",
+      "includes": [
+        ["can't submit, change or approve anything", "cannot submit, change or approve anything"]
+      ],
+      "excludes": [
+        "I have submitted",
+        "I've submitted",
+        "I have approved",
+        "I've approved",
+        "I submitted the",
+        "I approved the"
+      ],
+      "steps": false
+    },
+    {
+      "id": "mail",
+      "about": "The user's own mail about a title, read with one fixed fetch.",
+      "variant": "with_iq",
+      "question": "Find recent mail about The Glass Orchard",
+      "requires": "work_iq",
+      "tools": {
+        "required": ["work_iq_mail"]
+      },
+      "markers": ["W"]
+    }
+  ]
+}

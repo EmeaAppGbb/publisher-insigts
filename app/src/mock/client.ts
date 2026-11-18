@@ -37,92 +37,134 @@ const NO_TOOLS = (what: string): Canned => ({
   ].join('\n'),
 })
 
-const [maintenance, document, publicContext, mail] = SAMPLES.map((sample) => sample.question)
+const [attention, options, policy, publicContext, mail] = SAMPLES.map((sample) => sample.question)
 
-// By sample question, then variant.
+// By sample question, then variant. The figures and keys are the seeded week's rows (2 November 2026).
 export const MOCK_ANSWERS: Readonly<Record<string, Record<Variant, Canned>>> = {
-  [maintenance]: {
+  [attention]: {
     with_iq: {
       tools: [{
         server: 'fabric_iq_ontology', tool: 'ask_ontology',
-        arguments: '{"question":"Which Asset rows have the Status value \\"Maintenance\\"? Return each asset name and the name of its site."}',
+        arguments: '{"question":"Which TitleSignal rows have the IsMaterial value \\"Yes\\"? Return each SignalId, TitleName, SignalType, Headline, ExcessExposureGbp and RecommendedOption."}',
       }],
       answer: [
-        '**Pump B is in maintenance, at North Works.** [D1]',
+        '**Five material signals for three titles: Northbound Signals has excess UK hardback stock, The Glass Orchard sells at 3.1x its forecast and Salt and Starlight has momentum without a live campaign.** [D1] [D2] [D3]',
         '',
-        '- Pump B · Status "Maintenance" · located at North Works [D1]',
+        '- Northbound Signals · Excess inventory · 362 days of Hardback stock in UK with a reprint on order · £47,200 exposure · recommended: pause the planned reprint [D1]',
+        '- The Glass Orchard · Forecast variance · outperforming forecast by 3.1x [D2]',
+        '- Salt and Starlight · Marketing opportunity · momentum without a live campaign · recommended: increase marketing [D3]',
+        '- Salt and Starlight · Public momentum · search interest up 109% with 13 media mentions in four weeks [D4]',
+        '- Northbound Signals · Forecast variance · selling at 0.5x of forecast [D5]',
         '',
         'Sources',
-        '- [D1] ScenarioOntology · Asset · demo-asset-002',
+        '- [D1] BooksOntology · TitleSignal · sig-20261102-title-004-exc-ed-004-hb-uk',
+        '- [D2] BooksOntology · TitleSignal · sig-20261102-title-001-fcv',
+        '- [D3] BooksOntology · TitleSignal · sig-20261102-title-003-mkt',
+        '- [D4] BooksOntology · TitleSignal · sig-20261102-title-003-mom',
+        '- [D5] BooksOntology · TitleSignal · sig-20261102-title-004-fcv',
         '',
         'Steps',
-        '1. Fabric IQ ontology: asked which Asset rows have the Status value "Maintenance", with the name of each one\'s site; it returned Pump B at North Works.',
+        '1. Fabric IQ ontology: asked which TitleSignal rows have the IsMaterial value "Yes"; it returned five signals for three titles.',
       ].join('\n'),
     },
-    without_iq: NO_TOOLS('which assets are in maintenance or where they are'),
+    without_iq: NO_TOOLS('which titles need attention this week'),
   },
-  [document]: {
+  [options]: {
+    with_iq: {
+      tools: [
+        {
+          server: 'fabric_iq_ontology', tool: 'ask_ontology',
+          arguments: '{"question":"Which DecisionOption rows have the TitleName value \\"The Glass Orchard\\"? Return each OptionId, OptionName, IsRecommended, Units, InvestmentGbp, RevenueProtectedGbp, RemainingRiskGbp, ArrivalDays, KeyAssumption and PrimaryRisk."}',
+        },
+        {
+          server: 'foundry_iq_knowledge', tool: 'knowledge_base_retrieve',
+          arguments: '{"queries":["Who may approve an expedited reprint, and up to what investment, according to the decision authority matrix?"]}',
+        },
+      ],
+      answer: [
+        '**The expedited reprint is recommended: 20,000 units for £50,000, arriving in 21 days and protecting £84,571.** [D1] As an expedited reprint up to £150,000, it needs the publishing director\'s approval [F1 §1].',
+        '',
+        '- Expedited reprint · 20,000 units · £50,000 · protects £84,571 · 21 days · recommended [D1]',
+        '- Standard reprint · 32,000 units · £67,200 · protects £0, leaving £84,571 at risk · 35 days [D2]',
+        '- Reallocate stock from other territories · 8,658 units · £2,597 · protects £83,117, leaving £1,454 at risk · 7 days [D3]',
+        '',
+        'It assumes demand stays at the last two weeks\' rate until the reprint lands; the primary risk is that demand normalises before the stock arrives [D1].',
+        '',
+        'Sources',
+        '- [D1] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-expedite',
+        '- [D2] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-standard',
+        '- [D3] BooksOntology · DecisionOption · sig-20261102-title-001-inv-ed-001-hb-uk-reallocate',
+        '- [F1] Decision authority matrix · §1 Approval limits',
+        '',
+        'Steps',
+        '1. Fabric IQ ontology: asked for The Glass Orchard\'s DecisionOption rows; it returned three options for its UK hardback inventory risk.',
+        '2. Foundry IQ knowledge: asked who may approve an expedited reprint; it returned the decision authority matrix\'s approval limits.',
+      ].join('\n'),
+    },
+    without_iq: NO_TOOLS('The Glass Orchard\'s options or who may approve them'),
+  },
+  [policy]: {
     with_iq: {
       tools: [{
         server: 'foundry_iq_knowledge', tool: 'knowledge_base_retrieve',
-        arguments: '{"queries":["Where do current entity values come from, according to the starter document?"]}',
+        arguments: '{"queries":["How much stock cover should a reprint leave after it lands, according to the reprint and stock policy?"]}',
       }],
       answer: [
-        '**From the live ontology, not from the document.** The starter document says to use the ontology source for current entity values and counts [F1].',
+        '**28 days of cover after the reprint lands.** [F1 §3]',
         '',
-        '- The facts it lists describe the original seed, not current operational status [F1].',
+        '- The reprint and stock policy orders the daily rate × (the reprint\'s lead time + 28 days), less the stock on hand and on order, rounded up to the next 1,000 units and never below the edition\'s minimum reprint [F1 §3].',
         '',
         'Sources',
-        '- [F1] Synthetic asset operations starter knowledge · starter.txt',
+        '- [F1] Reprint and stock policy · §3 Sizing a reprint',
         '',
         'Steps',
-        '1. Foundry IQ knowledge: asked where current entity values come from; it returned the starter document\'s passage about the ontology source.',
+        '1. Foundry IQ knowledge: asked how much cover a reprint should leave; it returned the reprint and stock policy\'s section on sizing a reprint.',
       ].join('\n'),
     },
-    without_iq: NO_TOOLS('what the starter document says'),
+    without_iq: NO_TOOLS('what the reprint policy says'),
   },
   [publicContext]: {
     with_iq: {
       tools: [{
         server: 'web_iq_public_context', tool: 'web',
-        arguments: '{"query":"centrifugal pump maintenance guidance","contentFormat":"passage","maxResults":3,"maxLength":1500}',
+        arguments: '{"query":"romantasy readership trends","maxResults":3,"contentFormat":"passage","maxLength":1500}',
       }],
       answer: [
-        '**Public context, not company guidance:** general guidance for centrifugal pumps recommends regular checks of seals, bearings, vibration and alignment, with service intervals set by operating hours and conditions [Web1].',
+        '**Public context, not company data:** trade coverage describes romantasy as a fast-growing fiction category, with readers often finding titles through online communities [Web1].',
         '',
         'Sources',
-        '- [Web1] Centrifugal pump maintenance basics · example.com · https://example.com/centrifugal-pump-maintenance',
+        '- [Web1] Romantasy readership trends · example.com · https://example.com/romantasy-readership',
         '',
         'Steps',
-        '1. Web IQ public context: searched public guidance on centrifugal pump maintenance, without any site or asset name; it returned one general guide.',
+        '1. Web IQ public context: searched public coverage of romantasy readership trends, without any title, author or company detail; it returned one trade article.',
       ].join('\n'),
     },
-    without_iq: NO_TOOLS('public guidance on centrifugal pump maintenance'),
+    without_iq: NO_TOOLS('public context on romantasy readership'),
   },
   [mail]: {
     with_iq: {
       consent: 'work_iq_mail',
       tools: [{
         server: 'work_iq_mail', tool: 'fetch',
-        arguments: '{"entityUrls":["/me/messages?$search=\\"Pump B\\"&$select=subject,from,receivedDateTime,webLink,body&$top=10"]}',
+        arguments: '{"entityUrls":["/me/messages?$search=\\"The Glass Orchard\\"&$select=subject,from,receivedDateTime,webLink,body&$top=10"]}',
       }],
       answer: [
-        '**Two recent messages mention Pump B.**',
+        '**Two recent messages mention The Glass Orchard.**',
         '',
-        '- The maintenance team reported a worn seal on Pump B and planned its replacement [W1].',
-        '- The North Works site lead expects Pump B back in service after the replacement [W2].',
+        '- Brindle Print Works offered an expedited press slot for the hardback, to be confirmed by 6 November 2026 [W1].',
+        '- The major retail account manager asked for more UK hardback stock for a Christmas promotion [W2].',
         '',
-        'Mail is what people reported or planned, not current status; the live ontology holds that.',
+        'Mail is what people reported, offered or planned, not current figures; the live ontology holds those.',
         '',
         'Sources',
-        '- [W1] Outlook · Maintenance team · 10 November 2026 · Pump B seal replacement · https://example.com/mail/1',
-        '- [W2] Outlook · North Works site lead · 12 November 2026 · Pump B back in service · https://example.com/mail/2',
+        '- [W1] Outlook · Brindle Print Works scheduling · 30 October 2026 · Expedited slot for The Glass Orchard · https://example.com/mail/1',
+        '- [W2] Outlook · Major retail account manager · 2 November 2026 · Christmas promotion stock · https://example.com/mail/2',
         '',
         'Steps',
-        '1. Work IQ mail: searched your mail for "Pump B"; it returned two messages.',
+        '1. Work IQ mail: searched your mail for "The Glass Orchard"; it returned two messages.',
       ].join('\n'),
     },
-    without_iq: NO_TOOLS('what your mail says about Pump B'),
+    without_iq: NO_TOOLS('what your mail says about The Glass Orchard'),
   },
 }
 

@@ -1,8 +1,8 @@
-# Scenario assistant (Foundry prompt agents)
+# Book performance assistant (Foundry prompt agents)
 
 > [!IMPORTANT]
-> **Fictional sample.** The sites, assets, documents and mail in this scenario are invented to
-> demonstrate Microsoft IQ. They are not operational guidance.
+> **Fictional sample.** The publisher, its titles, authors, figures, documents and mail in this scenario
+> are invented to demonstrate Microsoft IQ. They are not commercial guidance.
 
 One Foundry prompt agent definition in two variants: the same model, the same instructions and the
 same question, with only the tools changing, so the app can compare an answer with IQ against one
@@ -13,8 +13,8 @@ project.
 
 | Variant | Directory | Runner key | Agent name | Display name | Tools |
 | --- | --- | --- | --- | --- | --- |
-| With IQ | `scenario-with-iq/` | `with_iq` | `<project>-with-iq` | Scenario assistant – with IQ | Fabric IQ ontology, Foundry IQ knowledge, Web IQ public context and, when Work IQ is enabled, Work IQ mail |
-| Without IQ | `scenario-without-iq/` | `without_iq` | `<project>-without-iq` | Scenario assistant – without IQ | None |
+| With IQ | `scenario-with-iq/` | `with_iq` | `<project>-with-iq` | Book performance assistant – with IQ | Fabric IQ ontology, Foundry IQ knowledge, Web IQ public context and, when Work IQ is enabled, Work IQ mail |
+| Without IQ | `scenario-without-iq/` | `without_iq` | `<project>-without-iq` | Book performance assistant – without IQ | None |
 
 Terraform names each variant in its `foundry_agents` output and gives the names to the container
 app as `AGENT_WITH_IQ` and `AGENT_WITHOUT_IQ`.
@@ -25,8 +25,8 @@ app as `AGENT_WITH_IQ` and `AGENT_WITHOUT_IQ`.
 | --- | --- | --- |
 | `agent.json` | All, byte-identical | The agent version's `description` (`{{agent_display_name}}`) and `definition`: `kind: prompt`, the model deployment (`{{agent_model_deployment}}`) and the reasoning effort (`{{agent_reasoning_effort}}`). |
 | `instructions.md` | All, byte-identical | The shared instructions, sent as the definition's `instructions`. |
-| `tools/FabricIQOntology.json` | With IQ | `fabric_iq_ontology`: `ScenarioOntology`'s ontology endpoint, allowing only `ask_ontology`, as the user. |
-| `tools/FoundryIQKnowledge.json` | With IQ | `foundry_iq_knowledge`: the agents' knowledge base of approved documents, such as `starter.txt`, allowing only `knowledge_base_retrieve`, as the project. |
+| `tools/FabricIQOntology.json` | With IQ | `fabric_iq_ontology`: `BooksOntology`'s ontology endpoint, allowing only `ask_ontology`, as the user. |
+| `tools/FoundryIQKnowledge.json` | With IQ | `foundry_iq_knowledge`: the agents' knowledge base of [approved documents](../scenario/knowledge/README.md), such as the reprint and stock policy, allowing only `knowledge_base_retrieve`, as the project. |
 | `tools/WebIQPublicContext.json` | With IQ | `web_iq_public_context`: Web IQ's MCP server, allowing only its `web` search with passage content, through the keyless `web-iq` connection as the project. |
 | `tools/WorkIQMail.json` | With IQ, when Work IQ is enabled | `work_iq_mail`: Work IQ's MCP server, allowing only `fetch`, on the `work-iq` connection, as the user. |
 
@@ -49,21 +49,25 @@ the placeholders from Terraform outputs and refuses any other placeholder:
 The tool descriptions, at most 1,024 characters each, carry what is specific to a tool, so the
 shared instructions stay generic:
 
-- **Fabric IQ ontology** asks one question about the rows of one entity, with values in quotes, such
-  as which `Asset` rows have a given `Status`, with each asset's site. Its rows are the only current
-  facts.
-- **Foundry IQ knowledge** retrieves passages from the approved documents. The agent takes each
-  document's title and section from the passage text, because a result can omit citation markers.
-- **Web IQ public context** is for public, general context only, such as a manufacturer's guidance
-  about a type of equipment. A query never holds a site, asset or person's name, and the agent uses at
-  most one line, labelled "Public context, not company guidance".
+- **Fabric IQ ontology** asks one question about the rows of one entity, with values in quotes and
+  the entity's key, such as which `TitleSignal` rows have the `IsMaterial` value "Yes", or a title's
+  `DecisionOption` rows. Its rows are the only current facts and figures.
+- **Foundry IQ knowledge** retrieves passages from the approved documents: the reprint and stock
+  policy, the marketing guidelines, the decision authority matrix, the signal glossary, the author
+  update template and the tone guide. The agent takes each document's title and section from the
+  passage text, because a result can omit citation markers.
+- **Web IQ public context** is for public, general context only, such as readership trends in a
+  genre. A query never holds a title, author, imprint, printer, retailer, person's name or company
+  figure, and the agent uses at most one line, labelled "Public context, not company data", never as
+  the reason for a title's results.
 - **Work IQ mail** makes one `fetch` of exactly
-  `/me/messages?$search="<asset name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
+  `/me/messages?$search="<title name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
   Work IQ's server also offers tools that act, so the tool allows only `fetch`.
 
-The instructions open with which tools each kind of question calls, then the rules (cite only
-sources received in the conversation, never fill a gap from memory, read-only), then the reply
-format: a Markdown answer with a marker after each fact (`[D1]` ontology data, `[F1]` or `[F1 §2]` an
+The instructions open with which tools each kind of question calls, then the rules (quote every
+figure as a row gives it and never calculate one, label an inference instead of claiming a cause,
+cite only sources received in the conversation, never fill a gap from memory, read-only), then the
+reply format: a Markdown answer with a marker after each fact (`[D1]` ontology data, `[F1]` or `[F1 §2]` an
 approved document, `[Web1]` public context, `[W1]` a mail message), a *Sources* line per marker and
 a numbered *Steps* list of the tools called. The app shows the markers as source chips. Because the
 without-IQ variant shares the instructions, they hold no document content or sample facts: those

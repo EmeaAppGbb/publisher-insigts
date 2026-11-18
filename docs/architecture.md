@@ -43,7 +43,7 @@ capacity workaround.
 | Path | Data and behavior | Identity |
 | --- | --- | --- |
 | **Indexed documents** | Each `knowledge_folders` entry, such as `documents` for the DEV lakehouse's `Files/documents` with `starter.txt` and the approved documents, feeds its own `indexedOneLake` source, checked every five minutes with the embedding model. The agents' knowledge base holds only the attached folders and answers at minimal effort with extractive passages. The lakehouse's Tables area isn't indexed. | Search's managed identity has **Contributor on DEV only** and access to the Foundry models. The agents read the knowledge base as the project's managed identity. |
-| **Live ontology** | The with-IQ agent queries the bound Site/Asset ontology through native **Fabric IQ**. A registered `fabricOntology` source also queries it at request time, but only in the check-only knowledge base that the runner's `verify` uses. Neither copies tables into an index. | Fabric IQ runs as the signed-in user (`UserEntraToken`). The Search source needs an **end-user Search-audience token** in `x-ms-query-source-authorization`. |
+| **Live ontology** | The with-IQ agent queries the bound `BooksOntology` through native **Fabric IQ**. A registered `fabricOntology` source also queries it at request time, but only in the check-only knowledge base that the runner's `verify` uses. Neither copies tables into an index. | Fabric IQ runs as the signed-in user (`UserEntraToken`). The Search source needs an **end-user Search-audience token** in `x-ms-query-source-authorization`. |
 | **Public context** | The agents' Web IQ tool calls Web IQ's MCP server directly, separate from the documents tool, so no document question triggers a web search. | Agent Service calls Web IQ as the project's managed identity through the `web-iq` connection; no key is stored. Queries carry public terms only. |
 
 The check-only knowledge base uses the `chat` model for query planning and answer synthesis; the agents run on their own `agent` deployment. The project's managed identity authenticates to Search; it does **not** replace the end-user token that live ontology queries need. With Work IQ, the agent also reads the user's own mail through Work IQ's MCP server, as that user.
@@ -63,7 +63,7 @@ format, in three parts:
 
 | Marker | Source line | IQ |
 | --- | --- | --- |
-| `[D1]` | `[D1] ScenarioOntology · <entity> · <key>` | Fabric IQ: ontology data |
+| `[D1]` | `[D1] BooksOntology · <entity> · <key>` | Fabric IQ: ontology data |
 | `[F1]`, `[F1 §2]` | `[F1] <document title> · <section>` | Foundry IQ: an approved document, optionally its section |
 | `[Web1]` | `[Web1] <page title> · <site> · <URL>` | Web IQ: public context |
 | `[W1]` | `[W1] Outlook · <sender> · <date> · <subject> · <link>` | Work IQ: a mail message |

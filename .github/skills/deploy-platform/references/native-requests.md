@@ -270,7 +270,7 @@ printf 'header = "Authorization: Bearer %s"\nheader = "x-ms-query-source-authori
     --output "$retrieval_response_file" "$verified_retrieve_url"
 ```
 
-Send the ontology question to the **check-only** knowledge base's `retrieve` URL (`ontology_check_knowledge_base_name`), never to the agents' knowledge base (`knowledge_base_name`), which holds no ontology. Quote the values in the question, as in `which Asset rows have the Status value "Maintenance"`: Fabric can read a bare value as an empty one. Merge the following source parameters into the `messages` request in `docs/ontology-knowledge.md`, using the actual ontology knowledge-source name:
+Send the ontology question to the **check-only** knowledge base's `retrieve` URL (`ontology_check_knowledge_base_name`), never to the agents' knowledge base (`knowledge_base_name`), which holds no ontology. Quote the values in the question, as in `which TitleSignal rows have the IsMaterial value "Yes"`: Fabric can read a bare value as an empty one. Merge the following source parameters into the `messages` request in `docs/ontology-knowledge.md`, using the actual ontology knowledge-source name:
 
 ```json
 {

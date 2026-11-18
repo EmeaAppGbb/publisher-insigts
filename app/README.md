@@ -1,4 +1,4 @@
-# Scenario assistant app
+# Book performance assistant app
 
 A one-page React app and its Node.js server, deployed as one container on Azure Container Apps. The browser signs
 the user in with MSAL (PKCE) and asks one of the two Foundry prompt agents, **with IQ** or **without IQ**, or both

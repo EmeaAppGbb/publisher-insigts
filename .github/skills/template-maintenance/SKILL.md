@@ -56,13 +56,15 @@ For changed Python, parse/compile source without executing notebook cells; Fabri
 
 For the knowledge configuration helper, verify the two-field change, repeatability, preservation of unrelated settings, rejection of zero/logical/conflicting IDs and custom registrations, and no cloud calls. Validate deployment-skill request shapes against the documented APIs; do not execute its live command examples as a template test.
 
-For the runtime preflight helper, run its standard-library tests with mocked native commands:
+For the runtime preflight helper and the eval runner, run their standard-library tests with mocked native
+commands and HTTP:
 `python3 -B -m unittest discover -s .github/skills/runtime-integration/tests`.
 Check template refusal, target/tenant mismatches, provider credential overrides,
 the Foundry scope and regional resource-type checks, the Node, Git and Azure CLI
 minimums, Fabric quota parsing (including a resize), the Work IQ prerequisite list
-and credential-output redaction. Do not run
-the helper's live probes as a template-maintenance check; those require a chosen
+and credential-output redaction, and the eval runner's judging, consent stop and token-free
+evidence. Do not run
+the helpers' live probes or evals as a template-maintenance check; those require a chosen
 derived checkout and explicit permission.
 
 For the deployment runner, its knowledge helper and its Foundry agent helper (`scripts/foundry_agent.py`), run their standard-library tests:
