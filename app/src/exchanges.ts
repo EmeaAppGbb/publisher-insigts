@@ -1,7 +1,8 @@
 // The page's conversation state, kept pure so the UI only dispatches: each exchange is one question, asked of one
 // agent or of both side by side; each thread holds one agent's turns, its follow-ups continuing the last answer, and
-// a decision continuing a run that waits for the user's approval.
+// a decision continuing a run that waits for the user's approval. A story page's exchange names its stage.
 import type { ApprovalDecision, ApprovalRequest, Question, ToolCall, TurnResult, Variant } from './live/types.ts'
+import type { Stage } from './story.ts'
 
 export interface Turn {
   id: string
@@ -27,17 +28,27 @@ export interface Exchange {
   id: string
   question: string
   threads: Thread[]
+  // The story stage that asked it; the Ask page's own questions have none.
+  stage?: Stage
 }
 
 export type Action =
   | { type: 'ask'; exchange: Exchange }
+  // Adds the other agent's thread to an exchange, such as the agent without IQ beside a story answer.
+  | { type: 'thread'; exchangeId: string; thread: Thread }
   | { type: 'follow-up'; threadId: string; turn: Turn }
   | { type: 'restart'; turnId: string; startedAt: number }
   | { type: 'tool'; turnId: string; call: ToolCall }
   | { type: 'finish'; turnId: string; result: TurnResult }
+  | { type: 'clear' }
 
 export function newTurn(id: string, question: string, startedAt: number, previousResponseId?: string): Turn {
   return { id, question, startedAt, running: true, toolCalls: [], ...(previousResponseId ? { previousResponseId } : {}) }
+}
+
+// The newest exchange a story stage asked: the list is newest first, and asking again adds a newer one.
+export function latestExchange(exchanges: readonly Exchange[], stage: Stage): Exchange | undefined {
+  return exchanges.find((exchange) => exchange.stage === stage)
 }
 
 // The response a follow-up in this thread continues: the last turn's, once it has answered.
@@ -90,6 +101,10 @@ export function reduce(state: Exchange[], action: Action): Exchange[] {
   switch (action.type) {
     case 'ask':
       return [action.exchange, ...state]
+    case 'thread':
+      return state.map((exchange) => (exchange.id === action.exchangeId && !exchange.threads.some((thread) => thread.variant === action.thread.variant)
+        ? { ...exchange, threads: [...exchange.threads, action.thread] }
+        : exchange))
     case 'follow-up':
       return state.map((exchange) => ({
         ...exchange,
@@ -109,5 +124,7 @@ export function reduce(state: Exchange[], action: Action): Exchange[] {
       return mapTurns(state, (turn) => (turn.id === action.turnId
         ? { ...turn, running: false, result: action.result, toolCalls: action.result.toolCalls }
         : turn))
+    case 'clear':
+      return []
   }
 }

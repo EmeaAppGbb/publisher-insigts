@@ -1,7 +1,8 @@
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { CHOICES, CHOICE_HINTS, LEGEND, type Choice } from '../labels.ts'
-import { IQ_NAMES, QUESTION_LIMIT } from '../live/protocol.ts'
+import { CHOICES, CHOICE_HINTS, type Choice } from '../labels.ts'
+import { QUESTION_LIMIT } from '../live/protocol.ts'
 import { SAMPLES } from '../samples.ts'
+import { Legend } from './Legend.tsx'
 
 interface ComposerProps {
   // Why asking is unavailable, such as before sign-in; undefined when the user can ask.
@@ -28,7 +29,7 @@ export function Composer({ blocked, onAsk }: ComposerProps) {
     }
   }
   return (
-    <section className="composer" aria-labelledby={`${id}-label`}>
+    <section className="card composer" aria-labelledby={`${id}-label`}>
       <form onSubmit={submit}>
         <label id={`${id}-label`} htmlFor={`${id}-question`} className="composer-label">
           Ask about the fictional book portfolio
@@ -60,12 +61,12 @@ export function Composer({ blocked, onAsk }: ComposerProps) {
             ))}
           </fieldset>
           <span className="count" aria-hidden="true">{text.length} / {QUESTION_LIMIT}</span>
-          <button type="submit" className="primary" disabled={Boolean(blocked) || !question}>Ask</button>
+          <button type="submit" className="btn primary" disabled={Boolean(blocked) || !question}>Ask</button>
         </div>
         <p id={`${id}-hint`} className={blocked ? 'hint blocked' : 'hint'}>{blocked ?? CHOICE_HINTS[choice]}</p>
       </form>
       <div className="samples">
-        <h2 id={`${id}-samples`}>Sample questions</h2>
+        <h2 id={`${id}-samples`} className="section-label">Sample questions</h2>
         <ul aria-labelledby={`${id}-samples`}>
           {SAMPLES.map((sample) => (
             <li key={sample.question}>
@@ -77,14 +78,7 @@ export function Composer({ blocked, onAsk }: ComposerProps) {
           ))}
         </ul>
       </div>
-      <dl className="legend" aria-label="Source markers">
-        {LEGEND.map((entry) => (
-          <div key={entry.marker}>
-            <dt><span className={`cite cite-${entry.iq}`}>{entry.marker}</span></dt>
-            <dd><strong>{IQ_NAMES[entry.iq]}</strong> {entry.what}</dd>
-          </div>
-        ))}
-      </dl>
+      <Legend />
     </section>
   )
 }

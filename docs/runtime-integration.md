@@ -515,7 +515,7 @@ tool consent.
 | App | `/healthz` answers 200, and `/api/config` serves this deployment's client ID | `app` phase |
 | Browser sign-in | A person signs in at the app URL, asks with IQ and without, and continues with a follow-up | You |
 | Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (The Glass Orchard's forecast variance), a cited passage of an approved document, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
-| Reprint request | Through the app, as you, after your one-time consent to the reprint request tool: with-IQ runs list the server's tool with your token, without a failed `tools/list` in the tool timeline, which proves the server's token checks; and "Submit a reprint request for The Glass Orchard" shows an approval card with the week's exact option values, which you reject, after which the answer says nothing was submitted. Never approve as a check: only a deliberate approval, the demo's own act, proves a write, and DEV can't take it back. | You |
+| Reprint request | Through the app, as you, after your one-time consent to the reprint request tool: with-IQ runs list the server's tool with your token, without a failed `tools/list` in the tool timeline, which proves the server's token checks; and **Prepare the request** on the Act page shows a decision card with the week's exact option values, which you reject, after which the answer says nothing was submitted. Never approve as a check: only a deliberate approval, the demo's own act, proves a write, and DEV can't take it back. | You |
 | Replies | Each answer carries a marker after each fact, then *Sources* and *Steps*, and shows the run's response ID | You |
 | Evals | Every [scenario eval](../scenario/evals/README.md) for the deployed week passes as you: the required tool calls without errors, markers with *Sources* lines, the expected facts, amounts in pounds only from the week's rows or the approved documents, Web IQ queries in public terms, and one reprint request proposed with the week's exact values, which the runner rejects | [`run_evals.py`](../.github/skills/runtime-integration/scripts/run_evals.py) |
 | Authorization | Missing consent, an expired sign-in, a missing Foundry role (HTTP 403), denied Fabric access or a missing approval role (the server's `role_insufficient` refusal) is an explicit failure, never an answer from another source or a recorded request | You, with a second account |
@@ -573,8 +573,9 @@ before changing regions or replacing anything.
 
 From `app/`, run the checks as CI does: `npm ci`, `npm run lint`, `npm run build`
 and `npm test`. `npm run dev:mock` serves the page at `http://localhost:3000/` with
-canned answers for the sample questions, and the approval card for "Submit a reprint
-request for The Glass Orchard": no sign-in and no Azure. The mock module
+canned answers for the sample questions, so every story page and the guided story
+play, and the Act page's decision card for "Submit an expedited reprint request for
+The Glass Orchard.": no sign-in and no Azure. The mock module
 loads only behind a literal `import.meta.env.MODE === 'mock'`, so production builds
 leave it out. The reprint request server has its own checks and local run in its
 [README](../scenario/workflows/reprint-request/README.md#commands); outside Azure it

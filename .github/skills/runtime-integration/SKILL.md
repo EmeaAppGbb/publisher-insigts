@@ -94,8 +94,8 @@ a question or writes a reprint request. For the remaining gates in `docs/runtime
 - **Browser sign-in.** The user signs in at the `app` output's URL, asks the sample
   question with IQ, accepts each consent card once (Fabric IQ, and the reprint
   request tool's, which asks to submit requests as them), asks again and gets
-  The Glass Orchard and its forecast variance with a `[D1]` marker; then compares with **Ask both** and
-  asks a follow-up. The runner's CLI token does not prove the app's registration,
+  The Glass Orchard and its forecast variance with a `[D1]` marker; then selects **Compare without IQ**
+  and asks a follow-up. The runner's CLI token does not prove the app's registration,
   its consent or the redirect bridge.
 - **Sources.** Decide from the tool timeline, not answer text: the Fabric IQ call
   must return live rows as the user, the Foundry IQ call a cited passage of an

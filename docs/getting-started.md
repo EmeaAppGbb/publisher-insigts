@@ -445,10 +445,10 @@ lists the phase's requests, for review and diagnosis.
 
 Each user consents once to the reprint request tool, through the consent card the
 app shows, which asks to submit requests as them; it can appear on their first
-with-IQ question after the server is deployed. To act, ask with IQ to submit a
-reprint request, such as "Submit a reprint request for The Glass Orchard". The agent
+with-IQ question after the server is deployed. To act, select **Prepare the request**
+on the app's Act page, or ask with IQ to submit a reprint request. The agent
 reads the week's inventory risk and its reprint options through Fabric IQ and
-proposes one option's exact values; the app shows them all on an approval card with
+proposes one option's exact values; the app shows them all on a decision card with
 **Approve** and **Reject**. Reject submits nothing. Approve sends the call: the
 server records it, naming you as the approver, when your role covers it, and the
 answer cites it as `[A1]`. The server refuses when your role doesn't cover the
@@ -579,21 +579,24 @@ prints. A healthy app is not an answered question. Open the URL and sign in with
 your work account:
 
 1. At first sign-in, consent to the app's access to Microsoft Foundry for you,
-   unless an administrator granted it for everyone.
-2. Ask **With IQ**: "What needs my attention this week?" Expect **The Glass
-   Orchard** and its forecast variance from the live ontology, cited `[D1]`. When a
-   tool first needs your permission, the app shows a consent card with Microsoft's
-   link: accept, then ask again. Fabric IQ, the reprint request tool and, with Work
-   IQ, Work IQ each ask once per user; Foundry IQ and Web IQ use the project's
-   identity and never ask.
-3. Select **Ask both** to compare the answer with IQ against the one without, and
-   ask a follow-up to continue the same conversation. A live answer can take a
-   minute; the server waits at most 225 seconds.
-4. Ask **With IQ**: "Submit a reprint request for The Glass Orchard." Check every
-   value on the approval card, then select **Reject**: the answer says nothing was
-   submitted. Approve only when you mean to act; DEV can't take it back
-   ([reprint request](#reprint-request)).
-5. Ask the other sample questions, or run the [scenario evals](../scenario/evals/README.md)
+   unless an administrator granted it for everyone. If the app doesn't ask, select
+   **Sign in** in the topbar.
+2. On **Signal**, select **Ask the agent**: "What needs my attention this week?"
+   Expect **The Glass Orchard** and its forecast variance from the live ontology,
+   cited `[D1]`. When a tool first needs your permission, the answer shows a
+   consent card with Microsoft's link: accept, then ask again. Fabric IQ, the
+   reprint request tool and, with Work IQ, Work IQ each ask once per user; Foundry
+   IQ and Web IQ use the project's identity and never ask.
+3. Select **Compare without IQ** to set the agent without IQ beside it, and **How I
+   got this** to check the route, the tool calls and the sources. Ask a follow-up
+   to continue the same conversation. A live answer can take a minute; the server
+   waits at most 225 seconds.
+4. On **Act**, select **Prepare the request**: "Submit an expedited reprint request
+   for The Glass Orchard." Check every value on the decision card, then select
+   **Reject**: the answer says nothing was submitted. Approve only when you mean to
+   act; DEV can't take it back ([reprint request](#reprint-request)).
+5. Walk the rest of the story with **Demo control** and **Start guided story**, ask
+   your own questions on **Ask**, or run the [scenario evals](../scenario/evals/README.md)
    from the deployment checkout, which ask every case as you, judge the tool calls,
    sources and figures, and reject the one reprint request a case proposes:
    `python3 .github/skills/runtime-integration/scripts/run_evals.py`.
