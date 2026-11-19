@@ -2757,7 +2757,8 @@ class AgentAndAppTests(unittest.TestCase):
 
     def test_the_app_phase_reports_how_to_use_and_compare_the_deployment(self):
         steps = " ".join(deploy.APP_NEXT)
-        for text in ("sign in", "consent card", "Ask both", "second user", deploy.SCENARIO.app_question):
+        for text in ("sign in", "consent card", "Prepare the request", "Compare without IQ", "second user",
+                     deploy.SCENARIO.app_question):
             self.assertIn(text, steps)
         for retired in ("ms app", "Power Platform", "rehearse", "presenter"):
             self.assertNotIn(retired, steps)

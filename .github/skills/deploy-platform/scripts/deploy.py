@@ -200,8 +200,8 @@ SCENARIO = Scenario(
     # Computed rows: the live ontology source must return them in its own source data, not only the starter document.
     # They hold for the seeded weeks and after the demo advances a week.
     expected_facts=("The Glass Orchard", "Forecast variance"),
-    app_question=('Ask "What needs my attention this week?" with IQ and expect The Glass Orchard, with a '
-                  'Forecast variance signal.'),
+    app_question=('On Signal, select Ask the agent ("What needs my attention this week?", with IQ) and expect The '
+                  'Glass Orchard, with a Forecast variance signal.'),
 )
 # Item types whose reviewed definitions --update-definitions may write over a live item; data items never.
 UPDATABLE_TYPES = ("Notebook", "Ontology", "DeploymentPlan")
@@ -239,11 +239,12 @@ APP_NEXT = (
     "consent page: accept, then ask again. Fabric IQ, the reprint request tool and, when work_iq_enabled, Work IQ "
     "each ask once per user; Foundry IQ and Web IQ use the project's identity and never ask.",
     SCENARIO.app_question,
-    "Ask with IQ to submit a reprint request: the app shows the exact request for you to approve or reject. Rejecting "
-    "submits nothing; approving lets the reprint server record it in the BookSignals KQL database with you as its "
-    "approver, if your approval role allows it, and the next ComputeBookSignals run marks the inventory risk "
-    "Actioned. DEV cannot take an approval back.",
-    "Select Ask both to compare the agent with IQ and the agent without IQ side by side.",
+    "On Act, select Prepare the request: the app shows the exact reprint request on a decision card for you to approve "
+    "or reject. Rejecting submits nothing; approving lets the reprint server record it in the BookSignals KQL database "
+    "with you as its approver, if your approval role allows it, and the next ComputeBookSignals run marks the "
+    "inventory risk Actioned. DEV cannot take an approval back.",
+    "Select Compare without IQ to set the agent without IQ beside an answer, and How I got this for its route, tool "
+    "calls and sources; on Ask, Ask both compares any question side by side.",
     "This run proves the route for your account only: sign in as a second user to see that each user reaches only "
     "the data they may read.",
     "Nothing to commit: the runner wrote only the ignored infra/terraform.tfvars. Change an agent in agents/ or the app "
