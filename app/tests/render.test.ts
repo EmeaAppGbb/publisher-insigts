@@ -25,8 +25,8 @@ test('paragraphs, line breaks, lists, emphasis and code', () => {
 
 test('markers become IQ-coloured chips with their section; unknown markers stay text', () => {
   assert.equal(
-    rendered('Status [D1], rule [F1 §2] and mail [W1].'),
-    `<p>Status ${chip('D1', 'fabric', 'Fabric IQ')}, rule ${chip('F1', 'foundry', 'Foundry IQ', 'F1 §2')} and mail ${chip('W1', 'work', 'Work IQ')}.</p>`,
+    rendered('Status [D1], rule [F1 §2], mail [W1] and request [A1].'),
+    `<p>Status ${chip('D1', 'fabric', 'Fabric IQ')}, rule ${chip('F1', 'foundry', 'Foundry IQ', 'F1 §2')}, mail ${chip('W1', 'work', 'Work IQ')} and request ${chip('A1', 'action', 'Reprint request')}.</p>`,
   )
   const html = rendered('[Web1] [D2] [F3 §4] [W9] `[W8]` [L1] [C1] [U1]')
   for (const [id, kind] of [['Web1', 'web'], ['D2', 'fabric'], ['F3', 'foundry'], ['W9', 'work']]) {

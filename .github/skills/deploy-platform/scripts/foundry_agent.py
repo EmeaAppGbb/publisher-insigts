@@ -3,7 +3,8 @@
 
 Each variant directory holds agent.json (byte-identical across variants: the model settings and description),
 instructions.md (byte-identical: the shared instructions) and, for a variant with IQ, tools/*.json: one MCP tool per
-IQ. `render` fills the {{placeholders}} from Terraform outputs into the exact agent version body the deployment
+IQ, read-only, and the one approval-gated reprint request tool, which Foundry runs only after the signed-in user
+approves the call in the app. `render` fills the {{placeholders}} from Terraform outputs into the exact agent version body the deployment
 runner sends to Foundry Agent Service, with the body's sha256 in its metadata. It leaves out the optional tools it is
 told to omit, such as Work IQ mail when Work IQ is disabled; `status` compares the digest with an agent's latest
 version. A tool holds exactly the fixed MCP keys, never headers, so no definition can carry a credential: tools
@@ -34,8 +35,17 @@ PLACEHOLDERS = frozenset({
     "agent_display_name", "agent_model_deployment", "agent_reasoning_effort",
     "knowledge_base_mcp_endpoint", "knowledge_base_connection", "public_context_mcp_endpoint",
     "public_context_connection", "fabric_iq_mcp_endpoint", "fabric_iq_connection",
-    "work_iq_mail_mcp_endpoint", "work_iq_mail_connection",
+    "work_iq_mail_mcp_endpoint", "work_iq_mail_connection", "reprint_request_mcp_endpoint", "reprint_request_connection",
 })
+# The only tool that changes anything, by file name without .json: its server, its connection and its one allowed
+# tool, exactly. Foundry asks the signed-in user to approve every call in the app before it runs. The rule follows the
+# server, not the file: any other tool that names this label or these placeholders is refused, whatever it asks.
+APPROVAL_TOOLS = {"ReprintRequest": {
+    "server_label": "reprint_request", "server_url": "{{reprint_request_mcp_endpoint}}",
+    "project_connection_id": "{{reprint_request_connection}}", "allowed_tools": ["submit_reprint_request"],
+}}
+# A tool names its server and connection only through placeholders, so no definition holds a deployment's URL.
+ONE_PLACEHOLDER = re.compile(r"\{\{[a-z_]+\}\}")
 SERVER_LABEL = re.compile(r"^[a-z][a-z0-9_]{1,62}$")
 AGENT_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 TOOL_KEYS = {"type", "server_label", "server_description", "server_url", "project_connection_id", "allowed_tools",
@@ -89,8 +99,23 @@ def load(source):
         # An empty list would allow every tool the server offers.
         if not (isinstance(allowed, list) and allowed and all(isinstance(name, str) and name for name in allowed)):
             problems.append("allowed_tools must name at least one tool")
-        if tool.get("require_approval") != "never":
-            problems.append("require_approval must be never: the app has no approval step")
+        for key in ("server_url", "project_connection_id"):
+            if not ONE_PLACEHOLDER.fullmatch(str(tool.get(key, ""))):
+                problems.append(f"{key} must be exactly one placeholder")
+        approval = APPROVAL_TOOLS.get(path.stem)
+        gated = [(stem, entry) for stem, entry in APPROVAL_TOOLS.items()
+                 if any(tool.get(key) == entry[key] for key in ("server_label", "server_url", "project_connection_id"))]
+        if approval:
+            if any(tool.get(key) != value for key, value in approval.items()):
+                problems.append(f"must be server_label {approval['server_label']} with its own endpoint and connection, "
+                                f"allowing exactly {', '.join(approval['allowed_tools'])}")
+            if tool.get("require_approval") != "always":
+                problems.append("require_approval must be always: the user approves every call in the app")
+        elif gated:
+            problems.append(f"only {gated[0][0]}.json may call the {gated[0][1]['server_label']} server, which asks the "
+                            "user to approve every call")
+        elif tool.get("require_approval") != "never":
+            problems.append("require_approval must be never: only the reprint request tool asks the user to approve")
         description = tool.get("server_description")
         if not (isinstance(description, str) and 0 < len(description) <= 1024):
             problems.append("server_description must be 1 to 1,024 characters")

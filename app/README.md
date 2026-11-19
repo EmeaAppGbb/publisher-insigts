@@ -1,20 +1,42 @@
-# Scenario assistant app
+# Book Intelligence app
 
 A one-page React app and its Node.js server, deployed as one container on Azure Container Apps. The browser signs
 the user in with MSAL (PKCE) and asks one of the two Foundry prompt agents, **with IQ** or **without IQ**, or both
 side by side. The server verifies the user's Foundry token, then calls the configured project's Responses API as that
 user and streams each tool call and the answer back. It holds no secret and stores no answer.
 
+## The page
+
+The page tells a guided story about the fictional focus title, The Glass Orchard. A charcoal rail switches between
+its pages; each story page asks one sample question of the agent with IQ, and its live, cited answer fills the page.
+The page itself shows no business figure: only the answers do, and it counts only what it measures, such as tool
+calls, sources and seconds.
+
+| Page | What it asks and shows |
+| --- | --- |
+| Signal | What needs attention this week, beside the decision window, the focus title's card and the run's own metrics |
+| Understand | One tab per IQ: sales from Fabric IQ, policy from Foundry IQ, public context from Web IQ, and the user's mail from Work IQ |
+| Decide | The title's options, each from its row, and the approver the decision authority matrix names |
+| Act | The reprint request: the agent holds it, the decision card shows every proposed value, and the user approves or rejects it |
+| Measure | The value ladder, from proposed to recorded, and the live answer that shows whether the risk is actioned |
+| Ask | Any question, with IQ, without IQ or both; every sample; every answer of the session, newest first |
+
+Each story answer can be asked again or compared with the agent without IQ. **How I got this**, and **Trust** in the
+topbar, open a drawer with the answer's route, tool calls and their queries, evidence ledger and steps. **Demo
+control** starts the guided story, which opens each page in turn and asks its question, asks the whole story at once,
+or clears every answer. The guided story ends on a reveal of the four IQs, with each one's calls and sources in this
+session. The page and Understand tab survive a sign-in redirect in the tab's `sessionStorage`; the answers do not.
+
 ## Layout
 
 | Path | What it holds |
 | --- | --- |
-| `src/` | The page: `App.tsx`, `components/`, the sample questions (`samples.ts`) and the conversation state (`exchanges.ts`) |
+| `src/` | The page: `App.tsx`, `components/` with the story pages in `components/pages/`, the sample questions (`samples.ts`), the conversation state (`exchanges.ts`) and the story (`story.ts`): pages, steps and what they derive from the answers |
 | `src/live/` | The agent layer: wire protocol, stream reader, one turn, the reply parser and safe Markdown renderer, MSAL sign-in, the client |
 | `src/mock/` | Mock mode's canned answers, loaded only behind `import.meta.env.MODE === 'mock'`, so production builds leave them out |
 | `src/redirect.ts`, `redirect.html` | MSAL's redirect bridge, the registration's only redirect URI |
 | `server/` | Settings (`config.ts`), token verification (`auth.ts`), the turn route (`turn.ts`), the Foundry stream (`foundry.ts`), static files, tracing, and the `main.ts` and `dev.ts` entries |
-| `tests/` | `node --test` with type stripping: server, protocol, parser, renderer, turn, mock and bundle checks |
+| `tests/` | `node --test` with type stripping: server, protocol, parser, renderer, turn, story, mock and bundle checks |
 
 ## Commands
 
@@ -22,7 +44,7 @@ From `app/`:
 
 | Command | Runs |
 | --- | --- |
-| `npm run dev:mock` | The page at `http://localhost:3000/` with canned answers for the sample questions: no sign-in, no Azure |
+| `npm run dev:mock` | The page at `http://localhost:3000/` with canned answers for the sample questions, so every story page and the guided story play, and the Act page's approval flow: no sign-in, no Azure |
 | `npm run dev` | The real server with Vite's middleware at `http://localhost:3000/`, against the deployment `.env.local` names |
 | `npm run build` | Type checks, then builds the page into `dist/` and bundles the server into one module, `dist-server/main.mjs` |
 | `npm start` | The built server on port 8080 |
@@ -60,11 +82,16 @@ An invalid or incomplete configuration stops the server at start.
 - `GET /healthz`: `ok`, untraced.
 - `GET /api/config`: `{ tenantId, clientId, scopes }`, the public sign-in settings.
 - `POST /api/turns`: `{ cid, variant, question, previousResponseId? }` with the user's bearer token: a lowercase
-  UUID, `with_iq` or `without_iq`, 1 to 2000 characters, and Foundry's response ID for a follow-up. Anything else is
-  a 400; a missing or invalid token is a 401 before anything else is read. The answer streams as newline-delimited
-  JSON: `{ "type": "tool", "call": … }` as each tool starts and finishes, `{ "type": "heartbeat" }` every 15
-  seconds, then `{ "type": "result", "outcome": … }`, which is `answered` (Markdown text), `needs-consent` (a link
-  to authorize Fabric IQ or Work IQ) or `failed`, each with Foundry's response ID when there is one.
+  UUID, `with_iq` or `without_iq`, 1 to 2000 characters, and Foundry's response ID for a follow-up. A decision on
+  an approval request is `{ cid, variant: "with_iq", approval: { id, approve }, previousResponseId }` instead: the
+  request's `mcpr_` ID, `true` or `false`, and the ID of the response that holds it. The server continues that
+  response with an `mcp_approval_response`; the browser never sends the tool's arguments, which Foundry keeps.
+  Anything else is a 400; a missing or invalid token is a 401 before anything else is read. The answer streams as
+  newline-delimited JSON: `{ "type": "tool", "call": … }` as each tool starts and finishes, `{ "type": "heartbeat" }`
+  every 15 seconds, then `{ "type": "result", "outcome": … }`, which is `answered` (Markdown text), `needs-consent`
+  (a link to authorize Fabric IQ, Work IQ or the reprint request), `needs-approval` (the one tool call the run holds
+  for the user's decision: its ID, server label, tool and plain arguments, refused unless all fit in 4 KB) or `failed`,
+  each with Foundry's response ID when there is one.
 - Everything else: the built page, with a strict content security policy. Only `/redirect.html` may be framed, by
   the app itself.
 

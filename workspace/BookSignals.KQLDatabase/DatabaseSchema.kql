@@ -1,0 +1,26 @@
+// ComputeBookSignals appends title_signals and decision_options, then one signal_runs row that completes its run.
+// The reprint server writes reprint_requests. The functions read only the latest complete run.
+
+.create-merge table title_signals (signal_id:string, title_id:string, title_name:string, author_name:string, signal_type:string, edition_id:string, format:string, territory:string, as_of_week:datetime, first_detected_week:datetime, material_since_week:datetime, headline:string, actual_vs_forecast:real, units_last_4w:long, forecast_last_4w:long, stock_on_hand:long, stock_on_order:long, stock_cover_days:real, reprint_lead_time_days:long, opportunity_at_risk_gbp:long, excess_exposure_gbp:long, driver_territory:string, driver_channels:string, search_momentum_change_pct:real, media_mentions_4w:long, confidence:string, is_material:string, status:string, recommended_option:string, run_id:string, computed_at:datetime)
+
+.create-merge table decision_options (option_id:string, signal_id:string, title_id:string, title_name:string, edition_id:string, territory:string, option_name:string, is_recommended:string, units:long, investment_gbp:long, revenue_protected_gbp:long, cost_avoided_gbp:long, remaining_risk_gbp:long, arrival_days:long, opportunity_at_risk_gbp:long, confidence:string, key_assumption:string, primary_risk:string, as_of_week:datetime, run_id:string, computed_at:datetime)
+
+.create-merge table signal_runs (run_id:string, as_of_week:datetime, computed_at:datetime, title_signals:long, decision_options:long)
+
+.create-merge table reprint_requests (request_id:string, signal_id:string, option_id:string, title_id:string, title_name:string, edition_id:string, territory:string, quantity:long, expedited:string, investment_gbp:long, rationale:string, evidence:string, required_approver:string, approver_role:string, approver_name:string, approver_object_id:string, approved_at:datetime, status:string, as_of_week:datetime)
+
+.create-or-alter function with (docstring = 'The latest complete ComputeBookSignals run: the newest as-of week, then the newest computation', folder = 'Books') latest_run() {
+    signal_runs
+    | sort by as_of_week desc, computed_at desc
+    | take 1
+}
+
+.create-or-alter function with (docstring = 'Title signals of the latest complete ComputeBookSignals run', folder = 'Books') latest_title_signals() {
+    title_signals
+    | where run_id == toscalar(latest_run() | project run_id)
+}
+
+.create-or-alter function with (docstring = 'Decision options of the latest complete ComputeBookSignals run', folder = 'Books') latest_decision_options() {
+    decision_options
+    | where run_id == toscalar(latest_run() | project run_id)
+}

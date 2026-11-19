@@ -4,26 +4,31 @@ The [web app](../app/README.md), a React page with a small Node.js server on Azu
 Container Apps, signs each user in and forwards their own Foundry token to two
 Foundry prompt agents: the [variants of one agent](../agents/README.md), with IQ
 and without. The with-IQ agent reaches the four IQs through one MCP tool each:
-Fabric IQ for live ontology facts, Foundry IQ for approved documents, Web IQ for
-public context through a Foundry IQ knowledge base of its own and, opt-in, Work IQ
-for the user's own mail. This page holds the route's contract, its identities, its
+Fabric IQ for live ontology facts, Foundry IQ for approved documents, Web IQ's own
+MCP server for public context and, opt-in, Work IQ for the user's own mail. Its one
+action, a [reprint request](#reprint-request), runs only after the user approves it
+in the app. This page holds the route's contract, its identities, its
 failures and the evidence for a ready shell.
 [Getting started step 7](getting-started.md#7-create-the-agents-and-app) creates it
 and the [runtime-integration skill](../.github/skills/runtime-integration/SKILL.md)
 proves it.
 
 Terraform owns the registry, the Container Apps environment, the container app
-(once the app phase sets `app_image_tag`), the identities, the sign-in and Work IQ
-registrations and every project connection. The runner's `agent` phase publishes
-the agents as Foundry project objects, outside Terraform state, and its `app` phase
-builds the image with ACR Tasks and applies the reviewed app plan.
+(once the app phase sets `app_image_tag`), the reprint request server's container
+app (once the reprint phase sets `reprint_image_tag`), the identities, the sign-in,
+reprint and Work IQ registrations and every project connection. The runner's
+`reprint` phase grants the reprint server's identity its KQL database roles, builds
+its image and applies the reviewed reprint plan; its `agent` phase publishes the
+agents as Foundry project objects, outside Terraform state; and its `app` phase
+builds the app's image with ACR Tasks and applies the reviewed app plan.
 
-Successful `agent` and `app` phases prove that each agent runs its reviewed
-definition and that the deployed app answers its health check with this
-deployment's sign-in settings. They don't prove an answer, a user's consent to the
-agents' tools or another user's isolation: ask through the app as yourself, then
-with a second account ([evidence](#evidence-required-for-a-ready-shell)). Live
-verification belongs in an explicitly chosen derived project, not this reusable
+Successful `reprint`, `agent` and `app` phases prove that the reprint server runs its
+reviewed image and its identity holds both KQL database roles, that each agent runs
+its reviewed definition and that the deployed app answers its health check with
+this deployment's sign-in settings. They don't prove a write, an answer, a user's
+consent to the agents' tools or another user's isolation: ask through the app as
+yourself, then with a second account ([evidence](#evidence-required-for-a-ready-shell)).
+Live verification belongs in an explicitly chosen derived project, not this reusable
 template.
 
 ## Runtime at a glance
@@ -35,8 +40,13 @@ signed-in user's, so Foundry's role-based access applies to them. Fabric IQ
 exchanges the user's token for its own audience, so Fabric workspace roles apply to
 that user. With Work IQ, Foundry's `work-iq` connection calls Work IQ with the token
 it keeps for that user since their one-time consent, so mailbox permissions apply.
-The agents read both knowledge bases as the project's managed identity, and Search
-calls Web IQ with the API key it holds. This is the intended authorization contract,
+The agents read the documents knowledge base as the project's managed identity, and
+Foundry Agent Service calls Web IQ as that identity too, through the `web-iq`
+connection, keyless. The diagram doesn't show the [reprint request](#reprint-request):
+after the user approves the call in the app, Foundry's `reprint-request` connection
+calls the reprint request server with the token it keeps for that user, and the
+server checks their approval role before it records the request as its own identity.
+This is the intended authorization contract,
 not evidence that every user or deployment has passed the checks below.
 
 [Editable Excalidraw source](diagrams/agent-runtime.excalidraw) | [All diagrams](diagrams/README.md) | [Icon sources](diagram-authoring.md#official-icon-sources)
@@ -49,17 +59,22 @@ six-character suffix once per deployment.
 | Component | Owner | Contract |
 | --- | --- | --- |
 | Agents `<project_name>-with-iq` and `<project_name>-without-iq` | Runner, `agent` phase | Versions of the reviewed definitions in [`agents/`](../agents/README.md) on the `agent` model deployment; each latest version's metadata holds the rendered body's `definition_sha256`. |
-| Project connections | Terraform, [`infra/foundry.tf`](../infra/foundry.tf) | `fabric-scenario` (`UserEntraToken`), `knowledge-base` and `public-context` (`ProjectManagedIdentity`), `work-iq` (`OAuth2`, only with Work IQ), `app-insights` for Foundry's tracing and `knowledge-search`. Each is declared with `isSharedToAll = false`, as Foundry stores them. |
-| Knowledge bases | Terraform, [`infra/knowledge.tf`](../infra/knowledge.tf), [`infra/web_iq.tf`](../infra/web_iq.tf) | `<project_name>-knowledge` for documents, `<project_name>-public-context` for Web IQ, and the check-only `<project_name>-ontology-check` that only `verify` queries ([ontology and knowledge](ontology-knowledge.md#two-retrieval-paths)). |
-| Container registry `cr<project_name without hyphens><suffix>` | Terraform, [`infra/app.tf`](../infra/app.tf) | Holds the `app` image. The admin user is disabled, and `container_registry_sku` defaults to `Basic`. |
+| Project connections | Terraform, [`infra/foundry.tf`](../infra/foundry.tf) and [`infra/reprint.tf`](../infra/reprint.tf) | `fabric-scenario` (`UserEntraToken`), `knowledge-base` and `web-iq` (`ProjectManagedIdentity`), `reprint-request` (`OAuth2`), `work-iq` (`OAuth2`, only with Work IQ), `app-insights` for Foundry's tracing and `knowledge-search`. Each is declared with `isSharedToAll = false`, as Foundry stores them. |
+| Knowledge bases | Terraform, [`infra/knowledge.tf`](../infra/knowledge.tf) | `<project_name>-knowledge` for documents and the check-only `<project_name>-ontology-check` that only `verify` queries ([ontology and knowledge](ontology-knowledge.md#two-retrieval-paths)). |
+| Container registry `cr<project_name without hyphens><suffix>` | Terraform, [`infra/app.tf`](../infra/app.tf) | Holds the `app` and `reprint-request` images. The admin user is disabled, and `container_registry_sku` defaults to `Basic`. |
 | Log Analytics `log-<prefix>`, Application Insights `appi-<prefix>` | Terraform, [`infra/monitoring.tf`](../infra/monitoring.tf) | The container's logs and the traces of the app and the agents. Application Insights accepts Entra ID only; see [traces and telemetry](#traces-and-telemetry). |
 | Container Apps environment `cae-<prefix>` | Terraform | Consumption workload profile; logs go to the Log Analytics workspace. |
 | App identity `id-<prefix>-app` | Terraform | User-assigned identity with `AcrPull` on the registry and Monitoring Metrics Publisher on Application Insights, and nothing else. |
 | Sign-in registration `<project_name>-app` | Terraform | Single-tenant single-page client without a secret or certificate. Its redirect URIs are exactly `https://<app>/redirect.html` and any `app_local_redirect_uris`; its only API permission is the delegated `https://ai.azure.com/user_impersonation`. |
 | Work IQ registration `<project_name>-work-iq` | Terraform, [`infra/work_iq.tf`](../infra/work_iq.tf), only with Work IQ | The `work-iq` connection's OAuth client: a public client without a secret, whose only redirect URI is Foundry's consent-service URL. |
 | Container app `ca-<prefix>` | Terraform, once `app_image_tag` is set | The `app:<tag>` image with external HTTPS ingress to port 8080, `/healthz` startup, readiness and liveness probes, `app.min_replicas` to `app.max_replicas` replicas (one to three by default) with an HTTP scale rule, and the settings below. |
+| Reprint API registration `<project_name>-reprint-api` | Terraform, [`infra/reprint.tf`](../infra/reprint.tf) | The audience of the users' tokens for the reprint request server: the delegated `ReprintRequest.Submit` scope and four approval roles. Terraform assigns the deployer Publishing director. |
+| Reprint OAuth client `<project_name>-reprint-client` | Terraform | The `reprint-request` connection's OAuth client: a public client without a secret, whose only redirect URI is Foundry's consent-service URL, declaring `ReprintRequest.Submit` and Microsoft Graph's `offline_access`. |
+| Reprint identity `id-<prefix>-reprint` | Terraform; the runner's `reprint` phase for its KQL roles | User-assigned identity with `AcrPull` on the registry, and Database Viewer and Database Ingestor on the `BookSignals` KQL database, and nothing else: no workspace role. |
+| Reprint request server `ca-<prefix>-mcp` | Terraform, once `reprint_image_tag` is set | The `reprint-request:<tag>` image with external HTTPS ingress to port 8080, `/healthz` probes only, so they never wake the Eventhouse, and `reprint_min_replicas` (one by default) to one replica. Its settings and routes are in its [README](../scenario/workflows/reprint-request/README.md#settings). |
+| `BookEvents` Eventhouse, `BookSignals` KQL database | Repository ([`workspace/`](../workspace/)), imported by the runner's `bootstrap` phase | Each `ComputeBookSignals` run's signals and options, and the recorded reprint requests ([data contract](../scenario/data/README.md#booksignals-kql-database)). They run on the Fabric capacity. |
 
-The container app's settings come only from Terraform: `PORT` (8080),
+The web app container's settings come only from Terraform: `PORT` (8080),
 `FOUNDRY_PROJECT_ENDPOINT`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID` (the sign-in
 registration), `AGENT_WITH_IQ`, `AGENT_WITHOUT_IQ`,
 `APPLICATIONINSIGHTS_CONNECTION_STRING`, `AZURE_CLIENT_ID` (the app identity, which
@@ -72,11 +87,12 @@ at start, and an invalid or incomplete configuration stops the container.
 
 | Hop | Interface | Identity |
 | --- | --- | --- |
-| Browser -> app server | `GET /api/config` returns `{ tenantId, clientId, scopes }`. `POST /api/turns` with `{ cid, variant, question, previousResponseId? }` answers with newline-delimited JSON: a `tool` event as each call starts and ends, a `heartbeat` every 15 seconds and one `result` | The user's token for `https://ai.azure.com/user_impersonation`, as `Authorization: Bearer` |
-| App server -> Foundry | `POST <project endpoint>/openai/v1/responses` with `agent_reference` to the variant's agent, the question as `input`, `previous_response_id` for a follow-up, the metadata `cid` and `variant`, and `stream: true` | The same token, forwarded |
-| With IQ -> Fabric IQ | MCP `ask_ontology` on `ScenarioOntology`'s endpoint, connection `fabric-scenario` | `UserEntraToken`: the user's token, exchanged for Fabric |
+| Browser -> app server | `GET /api/config` returns `{ tenantId, clientId, scopes }`. `POST /api/turns` with `{ cid, variant, question, previousResponseId? }`, or a decision `{ cid, variant: "with_iq", approval: { id, approve }, previousResponseId }`, answers with newline-delimited JSON: a `tool` event as each call starts and ends, a `heartbeat` every 15 seconds and one `result` | The user's token for `https://ai.azure.com/user_impersonation`, as `Authorization: Bearer` |
+| App server -> Foundry | `POST <project endpoint>/openai/v1/responses` with `agent_reference` to the variant's agent, the question as `input` (a decision as `[{ type: "mcp_approval_response", approval_request_id, approve }]`), `previous_response_id` for a follow-up or a decision, the metadata `cid` and `variant`, and `stream: true` | The same token, forwarded |
+| With IQ -> Fabric IQ | MCP `ask_ontology` on `BooksOntology`'s endpoint, connection `fabric-scenario` | `UserEntraToken`: the user's token, exchanged for Fabric |
 | With IQ -> Foundry IQ | MCP `knowledge_base_retrieve` on `<project_name>-knowledge`, connection `knowledge-base` | `ProjectManagedIdentity`, with Search Index Data Reader |
-| With IQ -> Web IQ public context | MCP `knowledge_base_retrieve` on `<project_name>-public-context`, connection `public-context` | `ProjectManagedIdentity`; Search calls Web IQ with its stored key |
+| With IQ -> Web IQ public context | MCP `web` on Web IQ's MCP server, `https://api.microsoft.ai/v3/mcp`, connection `web-iq` | `ProjectManagedIdentity`: the project identity, bound to the account's AppID |
+| With IQ -> reprint request, only after the user approves the call | MCP `submit_reprint_request` on `https://ca-<prefix>-mcp.<environment domain>/mcp`, connection `reprint-request` | `OAuth2` identity passthrough: the reprint API token Foundry keeps for each user after their consent |
 | With IQ -> Work IQ mail, only with Work IQ | MCP `fetch` on `https://workiq.svc.cloud.microsoft/mcp`, connection `work-iq` | `OAuth2` identity passthrough: the Work IQ token Foundry keeps for each user after their consent |
 
 The protocol lives in [`app/src/live/protocol.ts`](../app/src/live/protocol.ts), the
@@ -96,12 +112,14 @@ server in [`app/server/`](../app/server/).
    the Foundry audience (`https://ai.azure.com` or its application ID), `RS256`,
    the tenant ID, the app's own client ID as `appid` or `azp`, the
    `user_impersonation` scope and an object ID. Anything else is a 401. It then
-   accepts only the four request fields: a lowercase UUID, `with_iq` or
+   accepts only a question's four fields: a lowercase UUID, `with_iq` or
    `without_iq`, a question of 1 to 2,000 characters after trimming and, for a
-   follow-up, a Foundry response ID. Anything else is a 400. The browser can't
-   name an endpoint or an agent: the server calls only the configured project
-   endpoint and the two agent names in its settings, and builds no prompt of its
-   own.
+   follow-up, a Foundry response ID; or a decision's: the `cid`, `with_iq`, the
+   approval request's `mcpr_` ID with `true` or `false`, and the ID of the response
+   that holds it. Anything else is a 400. The browser can't
+   name an endpoint, an agent or a tool's arguments: the server calls only the
+   configured project endpoint and the two agent names in its settings, and builds
+   no prompt of its own.
 3. **Ask.** The server forwards the user's token to the project's Responses API,
    streaming, with the `cid` as `x-ms-client-request-id` and the W3C trace context
    of its `invoke_agent` span. It never calls Foundry as itself and keeps no token.
@@ -112,13 +130,24 @@ server in [`app/server/`](../app/server/).
    arguments. A consent request (`oauth_consent_request`, or a tool error that
    carries a consent link, as Fabric IQ's `CONSENT_REQUIRED` can) ends the turn
    with that link. The `result` is `answered` with the Markdown text,
-   `needs-consent` with the link, or `failed` with a message, each with Foundry's
+   `needs-consent` with the link, `needs-approval` with the call the run holds, or
+   `failed` with a message, each with Foundry's
    response ID when there is one. A server whose tool list holds none of the
    allowed tools is reported as a failed `tools/list`.
-5. **Log.** The server writes one value-free `app.turn` line per turn: the `cid`,
-   variant, follow-up flag, outcome, failure code, elapsed time, response ID and
-   each tool's IQ, state and time. It logs no question, answer, tool argument,
-   token or user identifier.
+5. **Approve.** When the run holds a tool call for approval (`mcp_approval_request`),
+   the turn ends with `needs-approval`: its `mcpr_` ID, server label, tool and
+   arguments, even when the model wrote text beside it. The page shows an approval
+   card with every argument as plain text, and **Approve** and **Reject**. The
+   decision continues the same run: the server sends Foundry an
+   `mcp_approval_response` with `previous_response_id`, and Foundry runs the call it
+   kept, or skips it. The browser sends only the approval request's ID and the
+   decision, never the arguments. A run that holds more than one call, or arguments
+   the card can't show in full (nested or overlong values, hidden characters, or more
+   than 4 KB in all), fails instead, and nothing runs.
+6. **Log.** The server writes one value-free `app.turn` line per turn: the `cid`,
+   variant, follow-up flag, decision (`approve` or `reject`) for a decision, outcome,
+   failure code, elapsed time, response ID and each tool's IQ, state and time. It
+   logs no question, answer, tool argument, token or user identifier.
 
 A turn may take 225 seconds (`TURN_TIMEOUT_MS`), inside Azure Container Apps'
 240-second request limit; the heartbeat keeps the connection open while a slow
@@ -132,8 +161,8 @@ an approved design, not a retry loop.
 
 | Variant | Agent name | Definition | Tools |
 | --- | --- | --- | --- |
-| Scenario assistant – with IQ | `<project_name>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ, Foundry IQ, Web IQ and, with Work IQ, Work IQ mail |
-| Scenario assistant – without IQ | `<project_name>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
+| Book performance assistant – with IQ | `<project_name>-with-iq` | [`agents/scenario-with-iq/`](../agents/scenario-with-iq/) | Fabric IQ, Foundry IQ, Web IQ, the approval-gated reprint request and, with Work IQ, Work IQ mail |
+| Book performance assistant – without IQ | `<project_name>-without-iq` | [`agents/scenario-without-iq/`](../agents/scenario-without-iq/) | None |
 
 The variants share a byte-identical `agent.json` (the model deployment, reasoning
 effort and description) and `instructions.md`; only their `tools/` differ.
@@ -143,7 +172,9 @@ a definition's `{{placeholders}}` need: the agent deployment and reasoning effor
 (`foundry_tool_connections` and `fabric_iq_connections`). A tool holds exactly the
 fixed MCP keys, never headers, so no definition can carry a credential: each tool
 authenticates through its project connection, and the app supplies no per-request
-input. The [agents' README](../agents/README.md) lists the files and placeholders
+input. Its `server_url` and `project_connection_id` are each exactly one
+placeholder, so no definition holds a deployment's URL or connection name. The
+[agents' README](../agents/README.md) lists the files and placeholders
 and explains how to add a `scenario-no-<iq>` variant.
 
 ### Publish
@@ -172,7 +203,13 @@ python3 .github/skills/deploy-platform/scripts/foundry_agent.py render \
   can read `{{name}}` in instructions as a template variable. They hold no document
   content or sample facts, because the without-IQ variant shares them.
 - Each tool allows only its reviewed tools (`allowed_tools`) with
-  `require_approval: never`, because the app has no approval step. An empty
+  `require_approval: never`, except one. The approval step follows the reprint
+  request server, not just the file: only `tools/ReprintRequest.json` may name it,
+  with exactly the `reprint_request` label, `{{reprint_request_mcp_endpoint}}`,
+  `{{reprint_request_connection}}`, `allowed_tools: ["submit_reprint_request"]` and
+  `require_approval: "always"`, so the app shows each call for the user's decision.
+  `foundry_agent.py` refuses any other tool that names that label or either
+  placeholder, whatever it asks for, and an approval step on any other tool. An empty
   `allowed_tools` would allow everything a server offers, so the runner refuses one.
 - The without-IQ variant has no tools and nothing to connect. A prompt agent has no
   switch for the model's general knowledge, so the shared rules keep every variant
@@ -182,10 +219,11 @@ python3 .github/skills/deploy-platform/scripts/foundry_agent.py render \
 
 | Tool file | Server label | Allowed tool | Target | Connection |
 | --- | --- | --- | --- | --- |
-| `FabricIQOntology.json` | `fabric_iq_ontology` | `ask_ontology` | `ScenarioOntology` | `fabric-scenario`, as the user |
+| `FabricIQOntology.json` | `fabric_iq_ontology` | `ask_ontology` | `BooksOntology` | `fabric-scenario`, as the user |
 | `FoundryIQKnowledge.json` | `foundry_iq_knowledge` | `knowledge_base_retrieve` | `<project_name>-knowledge` | `knowledge-base`, as the project |
-| `WebIQPublicContext.json` | `web_iq_public_context` | `knowledge_base_retrieve` | `<project_name>-public-context` | `public-context`, as the project |
+| `WebIQPublicContext.json` | `web_iq_public_context` | `web` | Web IQ's MCP server, passage content | `web-iq`, as the project |
 | `WorkIQMail.json` | `work_iq_mail` | `fetch` | Work IQ's MCP server: the user's own mail | `work-iq`, as the user; only with `work_iq_enabled` |
+| `ReprintRequest.json` | `reprint_request` | `submit_reprint_request`, after the user approves each call | The reprint request server | `reprint-request`, as the user |
 
 Each tool's `server_description`, at most 1,024 characters, carries what is
 specific to that tool, so the shared instructions stay generic. The app's tool
@@ -196,13 +234,13 @@ asked.
 
 `ask_ontology` answers in prose with a table of the properties a question names.
 A question across several entities, or a widened one such as everything related to
-an asset, can fail after 60–80 seconds with "Invalid JSON response from remote MCP
+a title, can fail after 60–80 seconds with "Invalid JSON response from remote MCP
 server" and an empty reply; a larger derived ontology showed this even on a warm
 capacity. So the tool description asks one question about the rows of one entity,
 naming the properties it needs and quoting each value: unquoted, Fabric can read a
-bare value as an empty one. The sample's question asks for `Asset` rows with each
-asset's site through `LocatedAt`; if it fails in your tenant, ask about one entity
-only. Fabric returns only the rows the user may read.
+bare value as an empty one. The sample's questions ask for the `TitleSignal` rows
+whose `IsMaterial` value is "Yes", or a title's `DecisionOption` rows, each with its
+key for the citation. Fabric returns only the rows the user may read.
 
 ### Foundry IQ knowledge
 
@@ -237,7 +275,7 @@ server, `https://workiq.svc.cloud.microsoft/mcp`, through the project connection
   `offline_access`. The app neither requests nor forwards it.
 - **Read-only.** Work IQ's MCP server also offers tools that create, change or act.
   The tool allows only `fetch`, and its description allows one fixed path:
-  `/me/messages?$search="<asset name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
+  `/me/messages?$search="<title name>"&$select=subject,from,receivedDateTime,webLink,body&$top=10`.
 - **Mail must be indexed.** Work IQ finds only mail in the user's own mailbox, after
   Microsoft 365 has indexed it. Put sample mail into that mailbox at least a day
   before you rely on it.
@@ -245,13 +283,57 @@ server, `https://workiq.svc.cloud.microsoft/mcp`, through the project connection
   covers the Work IQ API and the user, even for users with a Microsoft 365 Copilot
   license.
 
+### Reprint request
+
+The with-IQ agent's one action. Its tool, `ReprintRequest.json`, allows only
+`submit_reprint_request` with `require_approval: always`; its description has the
+agent ask Fabric IQ for the week's inventory risk and reprint options first, then
+propose one option's exact values with a short rationale and evidence. The shared
+instructions allow it only when the user asks to submit or raise a reprint request.
+Any other change gets the fixed refusal: "I can't submit, change or approve that. A
+person on the team makes that decision; I can draft or check it for you."
+
+- **Approved by the user.** Foundry holds every call until the user decides on the
+  app's approval card ([the app's contract](#the-apps-contract)). A rejection
+  submits nothing, and the agent says so. The agent never approves.
+- **As the user.** The `reprint-request` connection uses OAuth identity passthrough
+  (`OAuth2`), like Work IQ's. Its client is the public registration
+  `<project_name>-reprint-client`, which asks for the reprint API's
+  `ReprintRequest.Submit` and Microsoft Graph's `offline_access`. A user's first
+  with-IQ question after the server is deployed can return Foundry's consent link
+  ([consent for a tool](#consent-for-a-tool)); Foundry then keeps a token per user
+  and connection. The app neither requests nor forwards it.
+- **Checked by the server.** The
+  [reprint request server](../scenario/workflows/reprint-request/README.md) verifies
+  that token as the app's server verifies its own (issuer, audience, tenant, client,
+  scope and object ID), then the user's approval role against the decision authority
+  matrix (BKS-GOV-003 §1-§2): an expedited reprint up to £150,000 needs the
+  Publishing director, a standard one up to £50,000 the Production planning manager
+  and up to £150,000 the Head of production planning, and any reprint over £150,000
+  the Managing director; a more senior role in that line may approve instead. Every
+  argument must equal the current week's governed signal and option in the
+  `BookSignals` KQL database. `tools/list` needs no role; a call does.
+- **Recorded once.** One approved request per edition and territory actions a risk
+  (BKS-POL-001 §6): the same request again returns the recorded one, and any other
+  is refused, naming the request. The server appends the row as its own managed
+  identity, which holds only Database Viewer and Database Ingestor on `BookSignals`,
+  and reports it only after reading it back; the agent cites it as `[A1]`. The next
+  `ComputeBookSignals` run copies it into `dbo.reprint_requests`, insert-only, which
+  marks the inventory risk *Actioned*.
+- **Permanent in DEV.** Nothing takes an approval back, so no check approves: the
+  evals and readiness proofs reject the proposal
+  ([evidence](#evidence-required-for-a-ready-shell)).
+
+Never add another write tool, widen this one's arguments, roles or allow-list, or
+approve on a user's behalf.
+
 ### The reply format
 
-Foundry IQ and Web IQ both offer `knowledge_base_retrieve`, so their server labels,
-descriptions and the instructions keep document questions off the web: Web IQ is
-called last, in public terms, for at most one labelled line. Foundry's runtime
-hands knowledge-base results to the model as documents and invites its own
-`【1:2†source】` citations; the instructions allow only the
+Foundry IQ's `knowledge_base_retrieve` and Web IQ's `web` are separate tools, and
+their server labels, descriptions and the instructions keep document questions off
+the web: Web IQ is called last, in public terms, for at most one labelled line.
+Foundry's runtime hands Foundry IQ's knowledge-base results to the model as
+documents and invites its own `【1:2†source】` citations; the instructions allow only the
 [reply format's](architecture.md#reply-format) markers. A large tool result can
 make the model drop the format; the app's parser then shows the whole reply as the
 answer.
@@ -264,42 +346,44 @@ Terraform ([`infra/web_iq.tf`](../infra/web_iq.tf)) provisions a global
 The service is Microsoft-hosted and multi-tenant at a public HTTPS endpoint, without
 Private Link, VNet integration or regional residency. The pinned AzAPI provider
 lacks its embedded schema, so only this resource disables local schema validation;
-ARM still validates requests. Portal onboarding, AppID linking and the key are
-manual ([getting started](getting-started.md#web-iq)).
+ARM still validates requests. Portal onboarding and binding the project identity to
+the AppID are manual ([getting started](getting-started.md#web-iq)).
 
-After knowledge setup, Terraform adds the knowledge source `<project_name>-web`
-(kind `mcpServer` on `https://api.microsoft.ai/v3/mcp`, only the `web` tool, the key
-in a write-only `storedHeaders` `x-apikey` header) as the only source of the
-knowledge base `<project_name>-public-context`. The `WebIQPublicContext` tool
-queries that knowledge base, so no document question can trigger a web search. The
-base's retrieval instructions request passage content, the only format the key
-allows.
+After knowledge setup, Terraform adds the project connection `web-iq` to Web IQ's
+MCP server, `https://api.microsoft.ai/v3/mcp`. The `WebIQPublicContext` tool calls it
+directly, allowing only the `web` search, and is a separate tool from the documents
+knowledge base, so no document question can trigger a web search.
 
-- **Public-only queries.** The key is a project credential, not the user's
-  identity, so only instructions keep private data out: the tool description and the
-  base's retrieval instructions allow public, general context, such as a
-  manufacturer's guidance about a type of equipment, and never a site, asset or
-  person's name. The agent labels the line "Public context, not company guidance".
-  Check the query in the app's tool timeline when you test.
-- **The key.** It enters only as the sensitive, ephemeral input `web_iq_api_key`,
-  through the source's write-only body, so it never reaches tfvars, state or plans;
-  rotate it with `web_iq_api_key_version`. The runner supplies it from
-  `WEB_IQ_API_KEY` to every plan and apply from knowledge setup on, never to
-  destroy plans, and refuses an ambient `TF_VAR_web_iq_api_key`. A plan without the
-  key would remove the stored key.
-- **Verification.** `verify` makes one billable, fixed public-only search with
-  `WEB_IQ_API_KEY`, and one cited retrieval through the public-context knowledge
-  base, each attempted once. It records result counts and freshness metadata, not
-  keys or content. Neither shows that the key belongs to the deployed account:
-  confirm that yourself. Missing terms block deployment; missing account outputs or
-  search evidence block `verify`.
+- **Keyless identity.** The `web-iq` connection is a `RemoteTool` connection of type
+  `ProjectManagedIdentity` with the audience `https://api.microsoft.ai`, so Web IQ
+  receives a token for the project's managed identity; no key or header is stored
+  anywhere. Web IQ has no Azure RBAC: it accepts the identity only once an operator
+  binds its application (client) ID, the `web_iq` output's `client_id`, to the
+  account's AppID. Only Agent Service can use the identity, so neither the runner
+  nor a person can call Web IQ as it. A recreated Foundry project has a new
+  identity to bind.
+- **Passage content.** The AppID's profile is passage-only: a `web` call with
+  `contentFormat` `markdown`, `text` or `html` fails, so the tool description asks
+  for `passage`, at most 3 results and `maxLength` 1500. Web IQ caps `maxLength` at
+  3000 for such a profile.
+- **Public-only queries.** The identity is the project's, not the user's, so only
+  instructions keep private data out: the tool description and the agent's
+  instructions allow public, general context, such as readership trends in a genre,
+  and never a title, author, imprint, printer, retailer, person's name or company
+  figure. The agent labels the line "Public context, not company data". Check the
+  query in the app's tool timeline when you test; the [evals](../scenario/evals/README.md)
+  check every query against the portfolio's names.
+- **Verification.** `verify` makes no Web IQ call. It checks the account, that the
+  `web-iq` connection targets Web IQ's MCP server as the project identity with no
+  key, and your `--web-iq-bound` confirmation for the project identity's client ID,
+  which it records and asks for again when that ID changes. It can't read the
+  binding, so Web IQ retrieval stays unverified until the agent's cited
+  public-context line in the app. Missing terms block deployment; missing outputs or
+  a connection that isn't the project identity's block `verify`.
 
-Production Entra authentication for Web IQ requires manually binding an approved
-application's client ID to the Web IQ AppID in the portal, then obtaining app-only
-tokens for `https://api.microsoft.ai/.default`; availability can require Microsoft
-enablement. Do not create credentials on the Fabric deployment application or the
-app's sign-in registration, reuse a delegated-user token, or add a Web IQ tool with
-the key, a backend or browser credentials.
+Do not create credentials on the Fabric deployment application or the app's sign-in
+registration, reuse a delegated-user token, or add a Web IQ key, a backend or
+browser credentials.
 
 ## Traces and telemetry
 
@@ -313,7 +397,8 @@ traces both halves of a turn to the Application Insights resource `appi-<prefix>
   service name `scenario-assistant`, version the image tag) records a request span
   per request but the health probe, named by route, such as `POST /api/turns`. For
   each question it records an `invoke_agent <agent>` client span with
-  `gen_ai.agent.name`, `app.variant`, `app.cid`, `app.follow_up`, `app.outcome`,
+  `gen_ai.agent.name`, `app.variant`, `app.cid`, `app.follow_up`, `app.decision` for
+  a decision on a held call, `app.outcome`,
   `app.outcome.code`, `app.tool_calls`, `app.tool_failures` and Foundry's
   `gen_ai.response.id`, and each finished tool call as an `app.tool_call` event
   with `gen_ai.tool.name`, `app.tool.server`, `app.tool.iq`, `app.tool.state` and
@@ -332,6 +417,11 @@ traces both halves of a turn to the Application Insights resource `appi-<prefix>
 To find a turn's trace by the response ID the app shows, query
 `AppDependencies | where Properties["gen_ai.response.id"] == "<response ID>"` and
 open its `OperationId`.
+
+The reprint request server sends no traces. Its console log, in the same
+workspace, holds one value-free `reprint.request` line per request: the route,
+status, duration and, for a tool call, its outcome code, such as `created`,
+`replayed` or a refusal's code. It never logs a token, an argument or a name.
 
 Nothing holds an ingestion key: Application Insights accepts only Entra ID, and the
 app's managed identity and the Foundry project's identity publish with **Monitoring
@@ -353,10 +443,11 @@ group, so teardown isn't blocked.
 
 | Principal | Needs | Granted by |
 | --- | --- | --- |
-| Each app user | A Foundry role on the project that lets them run its agents through the Responses API, such as **Foundry User**. Read access to the DEV ontology and its bound data, because Fabric IQ queries run as them. With Work IQ, a mailbox and spending-policy coverage. | An operator. The template assigns no end-user roles. |
-| Deployer | Foundry User on the Foundry account, to publish and invoke the agents; Search Index Data Reader, for `verify`; Privileged Monitoring Data Reader, for trace content; and the subscription and Entra rights in [getting started](getting-started.md#prerequisites). | Terraform (`deployer_foundry_user`, `deployer_search_reader`, `deployer_telemetry_content_reader`); the rest is yours. |
-| Project managed identity | Search Index Data Reader, for both knowledge bases; Monitoring Metrics Publisher, for Foundry's traces. | Terraform |
+| Each app user | A Foundry role on the project that lets them run its agents through the Responses API, such as **Foundry User**. Read access to the DEV ontology and its bound data, because Fabric IQ queries run as them. To approve a reprint request, an approval role on the reprint API that covers it; without one, the server refuses the approved call. With Work IQ, a mailbox and spending-policy coverage. | An operator. The template assigns no end-user roles. |
+| Deployer | Foundry User on the Foundry account, to publish and invoke the agents; Search Index Data Reader, for `verify`; Privileged Monitoring Data Reader, for trace content; the Publishing director approval role on the reprint API; Admin on DEV, as its creator, which lets the runner grant the reprint server's KQL database roles; and the subscription and Entra rights in [getting started](getting-started.md#prerequisites). | Terraform (`deployer_foundry_user`, `deployer_search_reader`, `deployer_telemetry_content_reader`, `deployer_reprint_approver`); the rest is yours. |
+| Project managed identity | Search Index Data Reader, for the agents' knowledge base; Monitoring Metrics Publisher, for Foundry's traces. | Terraform |
 | App identity | `AcrPull` on the registry and Monitoring Metrics Publisher on Application Insights only: no Foundry, Search or Fabric access. | Terraform |
+| Reprint server identity | `AcrPull` on the registry, and Database Viewer and Database Ingestor on the `BookSignals` KQL database only: no workspace role and no Foundry or Search access. | Terraform (`AcrPull`); the runner's `reprint` phase, as you (the KQL database roles) |
 | Search managed identity | Contributor on DEV, for OneLake indexing; Cognitive Services User on the Foundry account, for the models. | Terraform, through the knowledge plan |
 
 The app's 403 message names Foundry User. Foundry Agent Consumer, the least-privilege
@@ -373,8 +464,15 @@ az role assignment create --assignee "<user-principal-name-or-object-id>" \
 
 Allow a few minutes for the assignment to apply. The app never holds an
 application credential or a shared token: Foundry decides who can run the agents,
-Fabric decides which ontology data each user can read, and Microsoft 365 decides
-whose mail Work IQ reads.
+Fabric decides which ontology data each user can read, Microsoft 365 decides
+whose mail Work IQ reads, and the reprint request server decides from each user's
+approval role whose approval records a request.
+
+Assign an approval role in the Microsoft Entra admin center: under **Enterprise
+applications**, open `<project_name>-reprint-api`, select **Users and groups** >
+**Add user/group**, then choose the user and the one role their authority matches
+([authority](../scenario/workflows/reprint-request/README.md#authority)). The role
+reaches the server in the next token Foundry obtains for that user.
 
 ### Sign-in
 
@@ -388,17 +486,22 @@ prints.
 
 ### Consent for a tool
 
-The first time Fabric IQ or Work IQ runs for a user, Foundry needs that user's
-consent to call the service as them. The stream carries an `oauth_consent_request`,
-or the tool's error names a consent link, and the app shows a consent card with
-that link. The user accepts in the new tab and asks again. Each user does this once
-per tool; Foundry IQ and Web IQ never ask. A consent lasts until the user or an
-administrator revokes it. Foundry can offer the link even where tenant policy
+The first time Fabric IQ, the reprint request tool or Work IQ runs for a user,
+Foundry needs that user's consent to call the service as them. The stream carries an
+`oauth_consent_request`, or the tool's error names a consent link, and the app shows
+a consent card with that link: to read data as the user, or, for the reprint request
+tool, to submit requests as them. The reprint request tool's card can appear on a
+user's first with-IQ question after the server is deployed, before any request. The
+user accepts in the new tab and asks again. Each user does
+this once per tool; Foundry IQ and Web IQ never ask. A consent lasts until the user
+or an administrator revokes it. Foundry can offer the link even where tenant policy
 doesn't let users consent; accepting then fails, and an administrator grants the
 consent for the organization instead
 ([Microsoft's guide](https://learn.microsoft.com/azure/foundry/agents/how-to/configure-user-delegation#complete-downstream-consent)):
-for Work IQ, `WorkIQAgent.Ask` and `offline_access` at the `api_permissions_url`
-that `terraform output work_iq` prints. The `verify` phase grants
+for the reprint request, `ReprintRequest.Submit` and `offline_access` at the
+`api_permissions_url` that `terraform output reprint_request` prints; for Work IQ,
+`WorkIQAgent.Ask` and `offline_access` at the one `terraform output work_iq` prints.
+The `reprint` phase grants the reprint client's two scopes and the `verify` phase
 `WorkIQAgent.Ask` tenant-wide as you; no tenant-wide grant replaces each user's own
 tool consent.
 
@@ -406,13 +509,16 @@ tool consent.
 
 | Gate | Required evidence | Checked by |
 | --- | --- | --- |
-| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`Pump B`, `North Works`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge`; an authenticated Web IQ search and a cited public-context retrieval; with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
+| DEV | Ingestion of every folder source; a `fabricOntology` reference with live data (`The Glass Orchard`, `Forecast variance`, or `--expect`) through the check-only knowledge base; a cited `indexedOneLake` reference from `<project_name>-knowledge` to the approved reprint policy (or your `--document-file`); the Web IQ account and its keyless `web-iq` wiring, with your `--web-iq-bound` confirmation (no Web IQ call); with Work IQ, the `WorkIQAgent.Ask` grant and the `work-iq` connection with its redirect URL, checked without a Work IQ call | `verify` phase |
 | Agents | Each agent's latest version carries the reviewed definition's digest | `agent` phase |
+| Reprint request server | `/healthz` answers 200, and `/readyz` reports that the server's own identity holds Database Viewer and Database Ingestor on `BookSignals` | `reprint` phase |
 | App | `/healthz` answers 200, and `/api/config` serves this deployment's client ID | `app` phase |
 | Browser sign-in | A person signs in at the app URL, asks with IQ and without, and continues with a follow-up | You |
-| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (Pump B at North Works), a cited starter-document passage, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
+| Sources | Through the app, as the tool timeline shows: Fabric IQ rows as the user (The Glass Orchard's forecast variance), a cited passage of an approved document, a public-only Web IQ query and, with Work IQ, `work_iq_mail`'s `fetch` returning the user's own mail after their consent. A document is never a live fact. | You |
+| Reprint request | Through the app, as you, after your one-time consent to the reprint request tool: with-IQ runs list the server's tool with your token, without a failed `tools/list` in the tool timeline, which proves the server's token checks; and **Prepare the request** on the Act page shows a decision card with the week's exact option values, which you reject, after which the answer says nothing was submitted. Never approve as a check: only a deliberate approval, the demo's own act, proves a write, and DEV can't take it back. | You |
 | Replies | Each answer carries a marker after each fact, then *Sources* and *Steps*, and shows the run's response ID | You |
-| Authorization | Missing consent, an expired sign-in, a missing Foundry role (HTTP 403) or denied Fabric access is an explicit failure, never an answer from another source | You, with a second account |
+| Evals | Every [scenario eval](../scenario/evals/README.md) for the deployed week passes as you: the required tool calls without errors, markers with *Sources* lines, the expected facts, amounts in pounds only from the week's rows or the approved documents, Web IQ queries in public terms, and one reprint request proposed with the week's exact values, which the runner rejects | [`run_evals.py`](../.github/skills/runtime-integration/scripts/run_evals.py) |
+| Authorization | Missing consent, an expired sign-in, a missing Foundry role (HTTP 403), denied Fabric access or a missing approval role (the server's `role_insufficient` refusal) is an explicit failure, never an answer from another source or a recorded request | You, with a second account |
 | Isolation | A second user can't continue or read the first user's conversation through its response ID, or reach their mail | You, with a second account |
 | Repeatability | Rerunning `up` publishes, builds and changes nothing | A rerun of `up` |
 
@@ -423,9 +529,10 @@ keep deployment IDs, accounts, tokens and logs out of reusable definitions and
 guidance.
 
 A deployed resource is not readiness. The runner reports **DEV ready** after
-`verify`, **agents ready** after `agent` and a **healthy app** after `app`; an answer
-from each variant through the app gives **verified for one user**. None is a ready
-shell. A single-account run is verified for that user, with isolation not
+`verify`, a **ready reprint server** after `reprint`, **agents ready** after `agent`
+and a **healthy app** after `app`; an answer from each variant through the app gives
+**verified for one user**. None is a ready shell, and a ready reprint server is not
+proof of a write. A single-account run is verified for that user, with isolation not
 demonstrated. Work IQ stays unverified without a tenant with mailboxes and a
 spending policy that covers the Work IQ API. A catalog entry, cached sign-in,
 plausible answer or the preflight's `candidate` result is not evidence.
@@ -466,9 +573,13 @@ before changing regions or replacing anything.
 
 From `app/`, run the checks as CI does: `npm ci`, `npm run lint`, `npm run build`
 and `npm test`. `npm run dev:mock` serves the page at `http://localhost:3000/` with
-canned answers for the sample questions: no sign-in and no Azure. The mock module
+canned answers for the sample questions, so every story page and the guided story
+play, and the Act page's decision card for "Submit an expedited reprint request for
+The Glass Orchard.": no sign-in and no Azure. The mock module
 loads only behind a literal `import.meta.env.MODE === 'mock'`, so production builds
-leave it out.
+leave it out. The reprint request server has its own checks and local run in its
+[README](../scenario/workflows/reprint-request/README.md#commands); outside Azure it
+has no managed identity, so its store calls are refused.
 
 `npm run dev` runs the real server with Vite's middleware at
 `http://localhost:3000/`, against the deployment that the ignored `app/.env.local`
@@ -496,12 +607,13 @@ agent="$(terraform -chdir=infra output -json foundry_agents | jq -r .without_iq.
 az rest --method post --resource https://ai.azure.com \
   --url "$endpoint/openai/v1/responses" \
   --headers Content-Type=application/json \
-  --body "{\"agent_reference\": {\"type\": \"agent_reference\", \"name\": \"$agent\"}, \"input\": \"Which assets are in maintenance?\"}" \
+  --body "{\"agent_reference\": {\"type\": \"agent_reference\", \"name\": \"$agent\"}, \"input\": \"What needs my attention this week?\"}" \
   --query "output[?type=='message'].content[].text" --output tsv
 ```
 
 If that answers but the app fails, look at the app, its settings or the sign-in
-registration. Agent and app changes are published the same way: commit, then rerun
+registration. To ask every [scenario eval](../scenario/evals/README.md) the same way and
+judge the runs, use [`run_evals.py`](../.github/skills/runtime-integration/scripts/run_evals.py). Agent, app and reprint request server changes are published the same way: commit, then rerun
 `up`.
 
 ## Troubleshooting
@@ -510,38 +622,49 @@ Treat authentication, authorization and tool failures as blockers, not empty
 answers. To locate one, compare the without-IQ agent, which calls no tool, with
 the with-IQ agent's turn and its tool timeline. Never copy tokens into requests,
 files or logs, switch to a shared, key-based or application identity, grant more
-than the access model above, widen a tool's `allowed_tools`, relax the server's
-token checks or recreate an agent to hide a failure.
+than the access model above, widen a tool's `allowed_tools`, relax the app's or the
+reprint server's checks, approve a reprint request to test it or recreate an agent
+to hide a failure.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | Bootstrap stops with `CapacityNotActive`; in the app, every with-IQ turn fails within seconds with "A user error occurred while executing a tool call" (`tool_user_error`) while the without-IQ agent answers | The Fabric capacity is paused | Resume the capacity in the Azure portal, then ask again. Pause it again when idle. |
 | Retrieval fails with HTTP 500 "exceeded the maximum runtime" right after a resume | A cold start | Retry; warm up with one question before you rely on the app. |
-| Graph materialization reports *Unsupported Data Source* for every entity | The ontology is bound through a OneLake (`AzureStorage.DataLake`) expression, which loses the `ONT_*` pins | Rerun `BindScenario` (`deploy.py up` reruns it while the binding is unverified): the binding must use the [SQL endpoint form](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint). |
-| Web IQ search or public-context retrieval fails with HTTP 401 or 403 | The key is wrong or rotated, or lacks Web Search | Create a new key in the portal, export it as `WEB_IQ_API_KEY`, increment `web_iq_api_key_version` and rerun `up`. |
-| Web IQ returns HTTP 429 | Web IQ quota | Wait, or raise the Web IQ quota; the runner never retries a billable search. |
+| Graph materialization reports *Unsupported Data Source* for every entity | The ontology is bound through a OneLake (`AzureStorage.DataLake`) expression, which loses the `ONT_*` pins | Rerun `BindBooks` (`deploy.py up` reruns it while the binding is unverified): the binding must use the [SQL endpoint form](ontology-knowledge.md#bind-through-the-sql-analytics-endpoint). |
+| The Web IQ tool fails with "A user error occurred while executing a tool call" (`tool_user_error`), which hides Web IQ's status | The call asked for a `contentFormat` other than `passage`; or the project identity's client ID isn't bound to the account's AppID, or the binding hasn't applied yet, for example after the project was recreated; or it is bound to several AppIDs; or the AppID isn't allowed Web Search | Read the call's arguments in the app's tool timeline, or the stored response (`GET <project endpoint>/openai/v1/responses/<id>`): `contentFormat` must be `passage`. Otherwise bind the `web_iq` output's `client_id` to exactly the account's AppID, with Web Search allowed, wait a minute and ask again; rerun `up` with `--web-iq-bound <client-id>` if `verify` asks. |
+| Web IQ returns HTTP 429 | The AppID's rate limit, shared by its keys and bound identities | Wait, or ask Web IQ support to raise the AppID's limit. |
 | Sign-in fails with `AADSTS50011` | The page's address isn't a registered redirect URI, such as `localhost` without `app_local_redirect_uris`, a Codespaces URL or a custom domain | Use the `app` output's `url`, or register `http://localhost:3000/redirect.html` through `app_local_redirect_uris`. |
 | Sign-in fails with msal.js `timed_out`, or silent renewal fails after a day | The redirect bridge isn't the registered redirect URI, or the bridge can't be framed | Register exactly `https://<app>/redirect.html` (Terraform does) and keep the server's `frame-ancestors 'self'` on `/redirect.html`. |
 | Sign-in asks for administrator approval, or fails with `AADSTS65001` | Consent to the app's Foundry scope is missing and users may not consent | Rerun `up`: the `consent` or `app` phase grants it as you. Otherwise an administrator grants it at the `app` output's `api_permissions_url`. |
 | The app says to sign in again (HTTP 401 from the app server) | The token expired, or isn't a Foundry token for this app | Reload the page; MSAL signs in again. |
 | Foundry refused the question (HTTP 403) | The user has no Foundry role on the project | An operator grants one from the [access model](#access-model); allow a few minutes. |
 | Foundry has no agent (HTTP 404) | The agent phase hasn't run, or the settings name another project | Rerun `deploy.py up`; compare `terraform output app_settings` with the container app's settings. |
-| HTTP 429 from the agent model | The `agent` deployment's quota is exhausted | Raise `agent_model.capacity` within your quota; for Web IQ calls or `verify`'s ontology check, `chat_model.capacity`. |
+| HTTP 429 from the agent model | The `agent` deployment's quota is exhausted | Raise `agent_model.capacity` within your quota; for `verify`'s ontology check, `chat_model.capacity`. |
 | A tool shows `tools/list` failed | The definition's `allowed_tools` names a tool the server doesn't offer | Fix the definition to the server's tool names and republish; never widen `allowed_tools`. |
 | Fabric IQ returns an empty reply, or "Invalid JSON response from remote MCP server", after 60–80 seconds | The question spans several entities or is too wide | Ask about one entity, name the properties you need and quote each value. |
 | The app shows a consent card on every question | The user didn't finish consenting, or tenant policy blocks user consent | Open the link, consent as yourself and ask again; otherwise an administrator grants it ([consent for a tool](#consent-for-a-tool)). Never consent for another user. |
 | Work IQ asks for consent that fails, or its tool fails after consent | No administrator consent to `WorkIQAgent.Ask` and `offline_access`, or no Copilot Credits spending policy covers the Work IQ API and the user | Have an administrator grant consent at the `work_iq` output's `api_permissions_url`, and check the spending policy ([Work IQ](getting-started.md#work-iq)). Never switch to a shared mailbox or identity. |
 | Work IQ finds no mail | The mail isn't in the signed-in user's own mailbox, or Microsoft 365 hasn't indexed it yet | Put it in that user's mailbox at least a day before you rely on it. |
+| The app says the agent proposed more than one call at once (`approval_several`), proposed a call it can't show in full (`approval_unreadable`) or held one without a response to continue (`approval_unanswerable`) | The run held several calls for approval, arguments the approval card can't show exactly, or no response ID | Ask again: nothing ran. Never approve a call you can't read in full. |
+| The reprint request tool fails its `tools/list`, or its consent card comes back | The user hasn't finished consenting, or their token fails the server's checks (audience, client, scope), for example after the registrations were recreated | Accept the consent card and ask again; otherwise rerun `up`, so the `reprint` phase grants the client's scopes, and compare the server's settings with the `reprint_request` output. Never relax the server's token checks. |
+| After an approval, the answer says the request needs another approver's role (`role_insufficient` in the server's log) | The user holds no approval role, or one below the option's required approver (BKS-GOV-003 §1) | An operator assigns the role the refusal names, or a more senior one in the production line ([access model](#access-model)); it applies from the next token Foundry obtains for that user. |
+| After an approval, the answer says a value differs from the governed option (`argument_mismatch`), or the signal or option isn't this week's (`signal_not_current`, `option_not_current`) | The agent didn't copy the option's values exactly; `ComputeBookSignals` has since computed another week; or `BookSignals` holds no complete run yet | Ask again; the refusal names the governed value. If `BookSignals` holds no run, run `ComputeBookSignals`. Never relax the server's checks. |
+| After an approval, the answer says the signal isn't open (`signal_not_open`) or a request already actions it (`already_requested`) | A request for the same edition and territory was already approved for this risk (BKS-POL-001 §6); once `ComputeBookSignals` copied it, the risk reads *Actioned* | Nothing to do: the refusal names the request. The same request again returns the recorded one. |
+| After an approval, the answer says the store is unavailable (`store_unavailable`) or the request couldn't be recorded (`not_recorded`) | The server can't read or append to `BookSignals`: the Fabric capacity is paused, the Eventhouse is resuming, or the identity lost a role | Resume the capacity, wait a minute and ask again; check `/readyz`. If a role is missing, rerun `up`: the `reprint` phase grants it again. |
+| `/readyz` answers 503, or the `reprint` phase waits for the server to see its roles | A new KQL role can take a few minutes to apply; otherwise the response's `code` names the cause: `database_not_found` or `database_ambiguous` (the `BookSignals` database can't be resolved), `token_unavailable` (no managed identity token), `store_unauthorized`, `store_forbidden` or `store_unavailable` | Rerun `up` after a few minutes. Otherwise read the response's `roles` and `code` and the container's console log. The runner grants the roles again only if the database doesn't list them; never give the identity a workspace role. |
 | The answer says documents are unavailable | Ingestion hasn't finished, or the connection or the project identity's Search role is missing | Check `knowledge_source_status_urls` and the knowledge phase's outputs. |
 | No answer within 225 seconds | A slow or cold tool call | Ask again once; a cold Fabric IQ query can be slow. Don't add retry loops or another backend. |
 | Tool progress appears only when the answer is complete | Something between the browser and the app buffers the stream, such as a corporate proxy | Let `/api/turns` pass unbuffered; the app streams newline-delimited JSON. |
 | The container doesn't start | A setting is missing or invalid; the server logs `app.server.config` with the problems | Read the revision's console log in the `log-<prefix>` workspace, fix the Terraform setting and rerun `up`. |
-| The runner refuses to build | The app's files under `app/` have uncommitted or untracked changes | Commit them, then rerun `up`. |
+| The runner refuses to build | The app's files under `app/`, or the reprint request server's under `scenario/workflows/reprint-request/`, have uncommitted or untracked changes | Commit them, then rerun `up`. |
+| The reprint phase stops for a `reprint_image_tag` line | `infra/terraform.tfvars` predates the reprint request | Add `reprint_image_tag = null` as in the tfvars example, then rerun `up`. |
 
 **Cost hygiene.** Between sessions, pause the Fabric capacity and set
-`app = { min_replicas = 0 }`, then rerun `up` to apply it. Resume the capacity
-before the next session and warm up with one question: the first one waits for the
-capacity and a cold start.
+`app = { min_replicas = 0 }` and `reprint_min_replicas = 0`, then rerun `up` to
+apply them. The `BookEvents` Eventhouse suspends by itself when idle. Resume the
+capacity before the next session and warm up with one question: the first one waits
+for the capacity and a cold start, as does the first reprint request call while
+`reprint_min_replicas = 0`.
 
 ## Routes to re-validate
 
@@ -550,11 +673,13 @@ environment, and keep this one until a replacement passes every gate.
 
 | Route | Status | Re-test when |
 | --- | --- | --- |
-| Foundry IQ and Web IQ knowledge bases as the user | Not available: Foundry's MCP connection to a knowledge base uses the project identity | Foundry documents a per-user connection for knowledge-base MCP endpoints |
+| The Foundry IQ knowledge base and Web IQ as the user | Not available: Foundry's MCP connection to a knowledge base uses the project identity, and Web IQ accepts only app-only tokens or keys | Foundry documents a per-user connection for knowledge-base MCP endpoints |
 | The agents' knowledge base with the live `fabricOntology` source | Not chosen: the agents' MCP connection can't send the per-request user header the source needs, so live facts come from native Fabric IQ, and only `verify` queries the check-only base | The connection can pass each user's Search-audience token |
 | Microsoft 365 Mail MCP (`mcp_MailTools`) with `UserEntraToken` | Blocked: Foundry's token exchange for it failed with "ARA OBO token request failed with status BadRequest" | Foundry's exchange works for that server |
 | The Work IQ MCP server with `UserEntraToken` or `AgentOnBehalfOfUser` | Not chosen: `UserEntraToken` isn't supported for this server, and `AgentOnBehalfOfUser`, in preview, needs agent-blueprint authorization that would change the app's sign-in | Microsoft supports `UserEntraToken` for it, or a reviewed sign-in change |
-| Web IQ as an agent tool with its key, or as a source of the agents' document knowledge base | Not chosen: the key would act for every user, and any document question could trigger a web search | Web IQ offers a per-user connection |
+| The reprint request server through a `UserEntraToken` connection | Not chosen: `UserEntraToken` isn't supported for a custom MCP server, so the `reprint-request` connection uses OAuth identity passthrough, like Work IQ's | Foundry supports `UserEntraToken` for custom MCP servers |
+| Web IQ as the only source of a public-context knowledge base: a Search `mcpServer` source with `foundryConnection` authentication naming `web-iq` | Blocked: queried by an agent through a knowledge-base connection, every call failed within a second with `tool_user_error`, without detail, while the same connection worked directly (17 November 2026) | Search documents how Agent Service resolves a source's Foundry connection, and an agent's call succeeds |
+| Web IQ with an API key, or as a source of the agents' document knowledge base | Not chosen: a key is a long-lived secret to store and rotate, and any document question could trigger a web search | A caller other than Foundry Agent Service must query Web IQ |
 
 ## Product contracts
 

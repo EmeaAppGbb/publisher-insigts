@@ -16,9 +16,10 @@ who acts on each item and how long it can take.
 - [ ] Obtain **Owner**, or **Contributor + Role Based Access Control Administrator / User Access Administrator**, on the target Azure subscription.
 - [ ] Obtain permission to register Azure resource providers and preview features in that subscription.
 - [ ] Obtain Entra permission to create/manage app registrations, service principals, application owners and pre-authorized clients, and read the existing Power BI Service and Microsoft Foundry API (**Azure Machine Learning Services**) enterprise applications.
-- [ ] Hold an Entra role that can grant tenant-wide consent for the [declared delegated Fabric permissions](docs/getting-started.md#3-bootstrap-the-fabric-user-auth-application) and the web app's delegated Foundry scope, such as Cloud Application Administrator, so the runner can grant them as you; otherwise arrange an administrator to grant them when the runner hands over the approval links.
+- [ ] Hold an Entra role that can grant tenant-wide consent for the [declared delegated Fabric permissions](docs/getting-started.md#3-bootstrap-the-fabric-user-auth-application), the web app's delegated Foundry scope and the reprint request connection's `ReprintRequest.Submit` and `offline_access`, such as Cloud Application Administrator, so the runner can grant them as you; otherwise arrange an administrator to grant them when the runner hands over the approval links.
 - [ ] Obtain Fabric permission to create workspaces, connections and deployment pipelines; include your deployment user in `fabric_capacity_admins`.
 - [ ] Decide who may use the app. Each additional user needs a Foundry role on the project, such as **Foundry User**, read access to the DEV ontology and its data and, with Work IQ, a mailbox and spending-policy coverage; Terraform grants Foundry access only to the deployer. See the [access model](docs/runtime-integration.md#access-model).
+- [ ] Decide who may approve reprint requests, and with which of the reprint API's four approval roles: Production planning manager, Head of production planning, Publishing director or Managing director. Terraform gives only you, the deployer, Publishing director; an operator assigns the others ([reprint request](docs/getting-started.md#reprint-request)).
 - [ ] If using Copilot, enable your GitHub Copilot subscription and organization access.
 - [ ] Obtain GitHub access to create the derived repository, push its bootstrap branch and open its Codespace.
 
@@ -30,9 +31,9 @@ who acts on each item and how long it can take.
 - [ ] Have a Fabric administrator enable **Users can create deployment plan (preview) items**.
 - [ ] Have a Fabric administrator enable external-app OneLake access and service-principal Fabric APIs.
 - [ ] Choose one Azure region that offers Foundry with the configured models, Azure Container Apps and Container Registry, and confirm Fabric CU quota, model quota (the `agent` and `chat` deployments share one) and Search tier availability/capacity. The [runtime preflight](docs/runtime-integration.md#preflight-is-not-readiness) checks the regional resource types.
-- [ ] Confirm the subscription allows ACR Tasks, which build the app's image.
+- [ ] Confirm the subscription allows ACR Tasks, which build the app's and the reprint request server's images.
 - [ ] For serverless Search, nothing to do as a subscription owner: the runner registers `Microsoft.Search/Serverless` and re-registers `Microsoft.Search` as you. With `--manual-grants`, an owner runs both commands it prints.
-- [ ] Accept the platform's billable usage, preview features and authenticated public endpoints, including the web app's public HTTPS address. Plan to pause the Fabric capacity and set `app = { min_replicas = 0 }` between sessions.
+- [ ] Accept the platform's billable usage, preview features and authenticated public endpoints, including the web app's and the reprint request server's public HTTPS addresses. Plan to pause the Fabric capacity and set `app = { min_replicas = 0 }` and `reprint_min_replicas = 0` between sessions.
 
 ## Repository and deployment host
 
@@ -41,7 +42,7 @@ who acts on each item and how long it can take.
 - [ ] If using Copilot, sign in through its own login flow. GitHub CLI is already signed in inside a Codespace; elsewhere the runner asks you to run `gh auth login` first.
 - [ ] Configure an encrypted, access-controlled Terraform backend and project-specific state key; grant the deployment identity backend read/write/locking access. For a single-user local-state demo, explicitly accept local state and arrange secure backup.
 - [ ] Configure the six placeholders in the ignored `infra/terraform.tfvars`: `project_name`, `location`, `fabric_capacity_admins`, `github_owner`, `github_repository_name` and `github_branch_name`.
-- [ ] Keep `knowledge_lakehouse_id = null` and `knowledge_ontologies = {}` until DEV bootstrap and binding succeed.
+- [ ] Keep `knowledge_lakehouse_id = null` and `knowledge_ontologies = {}` until DEV bootstrap and binding succeed, and keep `app_image_tag = null` and `reprint_image_tag = null`: the runner writes them. A tfvars file from before the reprint request needs the `reprint_image_tag = null` line added.
 - [ ] Choose the deployment subscription before the first run; the runner signs you in up front.
 
 ## Optional Fabric GitHub synchronization
@@ -53,7 +54,7 @@ who acts on each item and how long it can take.
 
 ## During deployment and first run
 
-- [ ] Start the [deployment runner](docs/development.md#deploy-deterministically) with the selected subscription and backend, and complete its up-front Azure CLI sign-ins by entering each device code and completing MFA.
+- [ ] Start the [deployment runner](docs/development.md#deploy-deterministically) with the selected subscription and backend, and complete its up-front Azure CLI sign-ins by entering each device code and completing MFA. They include a token for the KQL database (`https://kusto.kusto.windows.net`), which the reprint phase uses.
 - [ ] Review and approve the initial identity-only Terraform plan.
 - [ ] Consent: the runner grants it as you. Only if Entra refuses, have an administrator open the generated `api_permissions_url`, review the declared scopes and select **Grant admin consent**.
 - [ ] If the runner asks, sign in again with the generated deployment scope (it normally acquires that token silently); keep the same deployment user.
@@ -61,13 +62,16 @@ who acts on each item and how long it can take.
 - [ ] Confirm DEV item/notebook permissions, including `Item.ReadWrite.All` and `Item.Execute.All`; Git synchronization also requires workspace **Admin**.
 - [ ] If Fabric service-principal access is restricted to security groups, have the administrator include the provisioned Search identity in an allowed group.
 - [ ] If plan attachment is unavailable, explicitly approve the runner's `--bootstrap-fallback notebooks` path.
+- [ ] If DEV was bootstrapped before the reprint request, review the `ComputeBookSignals` and `Bootstrap` changes the runner prints, then rerun with `--update-definitions` and approve `item-update=<sha12>`; it then imports the `BookEvents` Eventhouse and `BookSignals` KQL database and runs `ComputeBookSignals` again.
 - [ ] Review the generated DEV ontology bindings before promotion; commit through Fabric source control when Git synchronization is enabled.
 - [ ] Review and approve the untargeted knowledge Terraform plan.
-- [ ] Commit any change under `agents/` or `app/`; the runner publishes the agent definitions in the checkout and builds only committed app files.
+- [ ] Commit any change under `agents/`, `app/` or `scenario/workflows/reprint-request/`; the runner publishes the agent definitions in the checkout and builds only committed app and server files.
+- [ ] Approve the reprint request server's KQL database roles (`reprint-roles`), its image build (`reprint-build`) and the saved reprint plan (`--approve reprint=<sha12>`) when requested. The runner grants its connection's `ReprintRequest.Submit` and `offline_access` as you; with `--manual-grants`, have an administrator grant them at the `reprint_request` output's `api_permissions_url`.
 - [ ] Approve the agent publication (`agent-publish`) when requested.
 - [ ] Approve the image build (`app-build`) and the saved app plan (`--approve app=<sha12>`) when requested. The runner grants the app's Foundry sign-in scope as you; with `--manual-grants`, have an administrator grant it at the reported link, or let each user consent at first sign-in.
-- [ ] Open the web app URL, sign in and ask the sample question **With IQ**; accept the Fabric IQ consent card once, ask again and confirm **Pump B at North Works**. Select **Ask both** to compare the answer without IQ.
-- [ ] For each additional user, assign a Foundry role on the project and read access to the required DEV Fabric items; have them sign in and repeat the check. Until a second user has, isolation is not demonstrated.
+- [ ] Open the web app URL, sign in and ask the sample question **With IQ**; accept each consent card once (Fabric IQ, and the reprint request tool, which asks to submit requests as you), ask again and confirm **The Glass Orchard** and its forecast variance. Select **Compare without IQ** to set the answer without IQ beside it.
+- [ ] Ask **With IQ** to submit a reprint request for The Glass Orchard, check every value on the approval card and reject it. Approve only when you mean to act: DEV can't take an approval back.
+- [ ] For each additional user, assign a Foundry role on the project and read access to the required DEV Fabric items and, for approvers, an approval role on the reprint API; have them sign in and repeat the check. Until a second user has, isolation is not demonstrated.
 - [ ] Retain and securely back up the deployment state.
 
 ## Web IQ
@@ -77,10 +81,10 @@ who acts on each item and how long it can take.
 - [ ] Set `web_iq_terms_accepted = true` in the same ignored tfvars file after accepting the terms.
 - [ ] After provisioning, read `terraform -chdir=infra output web_iq` and sign in to [Web IQ Profile Management](https://webiq.microsoft.ai/profiles).
 - [ ] Select the deployed subscription/resource, finish linking it, and select its resulting **Web IQ AppID**.
-- [ ] Create a Web Search-enabled API key for that AppID and inject it as `WEB_IQ_API_KEY` into the deployment process before knowledge setup, and in every later run; keep it out of chat, files, command history and the browser app.
-- [ ] Rerun the runner to verify an authenticated public search and a cited public-context retrieval.
+- [ ] Make sure that AppID allows Web Search. No API key is needed: the agents call Web IQ as the Foundry project identity.
+- [ ] After knowledge setup, when `verify` waits, bind the Foundry project identity's application (client) ID it prints (the `web_iq` output's `client_id`) on the AppID's **Application (Client) IDs** tab, then rerun the runner with `--web-iq-bound <client-id>`.
 - [ ] In the app, check a cited public-context line and that its query in the tool timeline holds public terms only; review citations, freshness and conflicting-source handling for your scenario ([Web IQ](docs/runtime-integration.md#web-iq)).
-- [ ] After rotating the key, export the new one and increment `web_iq_api_key_version`.
+- [ ] After recreating the Foundry project, bind its new identity's client ID and confirm it again.
 
 ## Work IQ (optional)
 

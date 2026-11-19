@@ -63,15 +63,15 @@ import foundry_agent as foundry  # noqa: E402
 import preflight_runtime as runtime  # noqa: E402
 
 PHASES = ("signin", "config", "preflight", "identity", "consent", "platform",
-          "bootstrap", "knowledge", "verify", "agent", "app")
+          "bootstrap", "knowledge", "verify", "reprint", "agent", "app")
 OK, USAGE, BLOCKED, WAITING, APPROVAL = 0, 1, 2, 3, 4
-PLAN_PHASES = ("identity", "platform", "knowledge", "app", "destroy")
+PLAN_PHASES = ("identity", "platform", "knowledge", "reprint", "app", "destroy")
 # Never granted by --yes: deletions, and replacing live Fabric definitions.
 DESTRUCTIVE_APPROVALS = ("destroy", "purge-foundry", "item-update", "shared-action-group")
 # Approved by the sha256 prefix of exactly what they change.
 DIGEST_APPROVALS = PLAN_PHASES + ("item-update",)
-APPROVAL_KEYS = DIGEST_APPROVALS + ("knowledge-registration", "agent-publish", "app-build", "purge-foundry",
-                                    "shared-action-group")
+APPROVAL_KEYS = DIGEST_APPROVALS + ("knowledge-registration", "agent-publish", "app-build", "reprint-build",
+                                    "reprint-roles", "purge-foundry", "shared-action-group")
 # A transient failure (a connection reset, EOF or timeout, HTTP 429 or 5xx) of a read is retried: at most this many
 # attempts in all, after Retry-After or an exponential backoff from RETRY_BACKOFF seconds.
 RETRY_ATTEMPTS = 3
@@ -122,9 +122,10 @@ VARIABLES = ("project_name", "location", "fabric_location", "search_location", "
              "knowledge_lakehouse_id", "knowledge_ontologies", "chat_model", "embedding_model", "agent_model",
              "app_image_tag", "web_iq_terms_accepted", "work_iq_enabled")
 WEB_IQ_API_VERSION = "2026-06-01-preview"
-WEB_IQ_SEARCH = "https://api.microsoft.ai/v3/search/web"
 WEB_IQ_PORTAL = "https://webiq.microsoft.ai/profiles"
-WEB_IQ_QUESTION = "Microsoft Web IQ documentation"
+# The audience of the project identity's token for Web IQ, and the API version of the Foundry connection that holds it.
+WEB_IQ_AUDIENCE = "https://api.microsoft.ai"
+FOUNDRY_CONNECTION_API_VERSION = "2025-10-01-preview"
 SEARCH_OFFERINGS = f"{ARM_API}/providers/Microsoft.Search/fetchOfferings?api-version=2026-09-01-preview"
 SEARCH_SERVICE_PATH = re.compile(r"/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Search/searchServices/[^/]+",
                                  re.IGNORECASE)
@@ -133,10 +134,16 @@ SEARCH_DEFERRED = {"search_identity_ready": "false"}
 
 
 class NotebookRun(NamedTuple):
-    """A bootstrap notebook (an item key in Scenario.items), its parameters and whether a completed run suffices."""
+    """A bootstrap notebook (an item key in Scenario.items), its parameters, whether a completed run suffices and the
+    earlier notebooks whose output it reads, so it runs again after any of them does.
+
+    A binding-chain notebook runs while the ontology binding is unverified. Any other runs whenever DEV has no
+    completed run of it, so one added after the first bootstrap still runs once. Each runs again after an update."""
     item: str
     parameters: dict
     skip_completed: bool
+    reads: tuple = ()
+    binding_chain: bool = True
 
 
 class Scenario(NamedTuple):
@@ -155,37 +162,46 @@ class Scenario(NamedTuple):
     runs: tuple
     # Asked of the ontology's check-only knowledge base, which holds the live ontology source.
     ontology_question: str
-    # Asked of the agents' knowledge base, retrieving from the indexed OneLake folder source document_source names.
+    # Asked of the agents' knowledge base, retrieving from the indexed OneLake folder source document_source names;
+    # a passage of the approved document document_file must answer it.
     document_question: str
     document_source: str
-    # Asked once of the public-context knowledge base: public terms only, never a site, asset or other private detail.
-    public_context_question: str
+    document_file: str
     expected_facts: tuple
     app_question: str
 
 
 SCENARIO = Scenario(
-    items=(("lakehouse", "Lakehouse", "Scenario"), ("seed", "Notebook", "SeedScenario"),
-           ("ontology", "Ontology", "ScenarioOntology"), ("bind", "Notebook", "BindScenario")),
+    items=(("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
+           ("signals", "Notebook", "ComputeBookSignals"), ("ontology", "Ontology", "BooksOntology"),
+           ("bind", "Notebook", "BindBooks"), ("knowledge", "Notebook", "PublishBooksKnowledge"),
+           ("eventhouse", "Eventhouse", "BookEvents"), ("kql", "KQLDatabase", "BookSignals")),
     plan="Bootstrap",
     registration="scenario",
-    registration_description="Current sites, assets, their status, and which site each asset belongs to.",
-    tables=("demo_sites", "demo_assets"),
-    expression="ScenarioLakehouse",
-    runs=(NotebookRun("seed", {"lakehouse_name": "Scenario", "allow_other_workspaces": False}, True),
-          NotebookRun("bind", {"lakehouse_name": "Scenario", "ontology_name": "ScenarioOntology"}, False)),
+    registration_description=("Current book performance: titles, editions, campaigns, the latest week's signals and "
+                              "decision options, title performance and reprint requests."),
+    tables=("titles", "editions", "campaigns", "title_signals", "decision_options", "title_performance",
+            "reprint_requests"),
+    expression="BooksLakehouse",
+    runs=(NotebookRun("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
+          NotebookRun("signals", {"lakehouse_name": "Books", "kql_database_name": "BookSignals"}, True, ("seed",)),
+          NotebookRun("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
+          NotebookRun("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True,
+                      binding_chain=False)),
     # The value is quoted: unquoted, Fabric sometimes read a bare value as an empty one and found nothing.
-    ontology_question=("Using the live ScenarioOntology, which Asset rows have the Status value \"Maintenance\", and "
-                       "at which site is each asset located? Return asset names and site names."),
-    document_question=("According to the indexed starter document, what does Git store, what does SeedScenario "
-                       "materialize, and which source should be used for current entity values? Answer from the "
-                       "OneLake document and cite it."),
+    ontology_question=("Using the live BooksOntology, which TitleSignal rows have the IsMaterial value \"Yes\"? "
+                       "Return each signal's TitleName and SignalType."),
+    document_question=("According to the approved reprint and stock policy, how many days of cover should a reprint "
+                       "leave after it lands, and at what net revenue at risk does an inventory risk become material? "
+                       "Answer from the OneLake document and cite its section."),
     document_source="documents",
-    public_context_question=("What does manufacturer and industry guidance recommend for the routine preventive "
-                             "maintenance of industrial centrifugal pumps?"),
-    # Seeded rows: the live ontology source must return them in its own source data, not only the starter document.
-    expected_facts=("Pump B", "North Works"),
-    app_question='Ask "Which assets are in maintenance, and at which site?" with IQ and expect Pump B at North Works.',
+    # PublishBooksKnowledge writes it to the documents folder; a starter.txt passage does not prove it is indexed.
+    document_file="bks-pol-001-reprint-and-stock-policy-v1.md",
+    # Computed rows: the live ontology source must return them in its own source data, not only the starter document.
+    # They hold for the seeded weeks and after the demo advances a week.
+    expected_facts=("The Glass Orchard", "Forecast variance"),
+    app_question=('On Signal, select Ask the agent ("What needs my attention this week?", with IQ) and expect The '
+                  'Glass Orchard, with a Forecast variance signal.'),
 )
 # Item types whose reviewed definitions --update-definitions may write over a live item; data items never.
 UPDATABLE_TYPES = ("Notebook", "Ontology", "DeploymentPlan")
@@ -220,10 +236,15 @@ APP_NEXT = (
     "Open the app URL above in a browser and sign in. At first sign-in, consent to the app's access to Microsoft "
     "Foundry for you, unless an administrator granted it for everyone (terraform output app: api_permissions_url).",
     "Ask with IQ. When a tool first needs your permission, the app shows a consent card that links to Microsoft's "
-    "consent page: accept, then ask again. Fabric IQ, and Work IQ when work_iq_enabled, each ask once per user; "
-    "Foundry IQ and Web IQ use the project's identity and never ask.",
+    "consent page: accept, then ask again. Fabric IQ, the reprint request tool and, when work_iq_enabled, Work IQ "
+    "each ask once per user; Foundry IQ and Web IQ use the project's identity and never ask.",
     SCENARIO.app_question,
-    "Select Ask both to compare the agent with IQ and the agent without IQ side by side.",
+    "On Act, select Prepare the request: the app shows the exact reprint request on a decision card for you to approve "
+    "or reject. Rejecting submits nothing; approving lets the reprint server record it in the BookSignals KQL database "
+    "with you as its approver, if your approval role allows it, and the next ComputeBookSignals run marks the "
+    "inventory risk Actioned. DEV cannot take an approval back.",
+    "Select Compare without IQ to set the agent without IQ beside an answer, and How I got this for its route, tool "
+    "calls and sources; on Ask, Ask both compares any question side by side.",
     "This run proves the route for your account only: sign in as a second user to see that each user reaches only "
     "the data they may read.",
     "Nothing to commit: the runner wrote only the ignored infra/terraform.tfvars. Change an agent in agents/ or the app "
@@ -705,7 +726,7 @@ def approval_record(key, description, pending):
     return record
 
 
-def terraform_env(ctx, token_required, web_iq_required=False):
+def terraform_env(ctx, token_required):
     env = dict(ctx.environ)
     for key in ("TF_LOG", "TF_LOG_CORE", "TF_LOG_PROVIDER", "TF_LOG_PATH"):
         if env.get(key):
@@ -723,28 +744,11 @@ def terraform_env(ctx, token_required, web_iq_required=False):
         env["TF_VAR_github_token"] = token
     elif token_required:
         raise Waiting("The Fabric GitHub PAT is not available on this host.", *PAT_STEPS)
-    # Terraform gets the key exactly when a plan manages the public-context source: an ephemeral variable set at plan
-    # time must be set again at apply, and one that wasn't must not be, so its presence can't depend on the shell.
-    key = (env.pop("WEB_IQ_API_KEY", None) or "").strip()
-    if web_iq_required:
-        if not key:
-            raise Waiting("Knowledge plans need the Web IQ key: the public-context knowledge source stores it write-only.",
-                          "Supply that resource's key only through WEB_IQ_API_KEY on the deployment host, then rerun.",
-                          "Never paste keys into chat, Terraform inputs, files or the browser app; see docs/getting-started.md#web-iq.")
-        if any(ord(character) < 33 or ord(character) > 126 for character in key):
-            raise Blocked("WEB_IQ_API_KEY contains invalid HTTP header characters; supply a valid portal key.")
-        env["TF_VAR_web_iq_api_key"] = key
     return env
 
 
-def web_iq_key_required(ctx, destroy=False):
-    """After knowledge setup every plan manages the Web IQ public-context source; Terraform needs its write-only
-    key at plan and at apply, because ephemeral values are not saved in a plan. Teardown doesn't."""
-    return not destroy and variables(ctx)["knowledge_lakehouse_id"] is not None
-
-
-def terraform(ctx, *arguments, token=False, web_iq=False, stream=False, input_text=None):
-    env = terraform_env(ctx, token, web_iq)
+def terraform(ctx, *arguments, token=False, stream=False, input_text=None):
+    env = terraform_env(ctx, token)
     if arguments[0] == "console" and not env.get("TF_VAR_github_token"):
         # Evaluate the Git opt-in before requiring its ephemeral credential, never for plan/apply.
         env["TF_VAR_github_token"] = "evaluation-only"
@@ -883,8 +887,7 @@ def converge(ctx, phase, target=None, check=None, variables=None, before_apply=N
         command += [f"-var={name}={value}" for name, value in sorted((variables or {}).items())]
         ctx.log("Creating a saved plan" + (f" targeted at {target} (expected only here)" if target else "")
                 + "".join(f" with {name}={value}" for name, value in sorted((variables or {}).items())) + ".")
-        result = terraform(ctx, *command, token=git_token_required(ctx), web_iq=web_iq_key_required(ctx, destroy),
-                           stream=True)
+        result = terraform(ctx, *command, token=git_token_required(ctx), stream=True)
         if result.code == 0:
             path.unlink(missing_ok=True)
             if before_apply:
@@ -934,8 +937,7 @@ def converge(ctx, phase, target=None, check=None, variables=None, before_apply=N
     approve(ctx, phase, f"Apply the saved {phase} plan ({describe(summary)})" + (f"; {note}" if note else ""), pending)
     if before_apply:
         before_apply()
-    result = terraform(ctx, "apply", "-input=false", pending["path"], token=git_token_required(ctx),
-                       web_iq=web_iq_key_required(ctx, destroy), stream=True)
+    result = terraform(ctx, "apply", "-input=false", pending["path"], token=git_token_required(ctx), stream=True)
     discard_plan(ctx, phase)
     if not result.code:
         # Every other saved plan was made against the state this apply changed, so Terraform would refuse it.
@@ -1232,6 +1234,8 @@ def token_audiences(ctx):
             audiences.append(("the Fabric deployment scope", {"scope": login_scope}))
     if "verify" in ctx.phases:
         audiences.append(("Azure AI Search", {"resource": SEARCH_RESOURCE}))
+    if "reprint" in ctx.phases:
+        audiences.append(("the KQL database", {"resource": KUSTO_RESOURCE}))
     if "agent" in ctx.phases:
         audiences.append(("Microsoft Foundry", {"scope": FOUNDRY_SCOPE}))
     return audiences
@@ -1424,7 +1428,8 @@ def check_web_iq(ctx, subscription, values):
                       "Ask your Microsoft representative to enable Web IQ for a paid subscription; Azure credits do not work.",
                       "Provider registration alone does not prove subscription eligibility.")
     return ("Web IQ global G3 required; Terraform registers Microsoft.WebIQ; paid-subscription eligibility "
-            "is proven only by account creation; portal AppID linking remains manual")
+            "is proven only by account creation; binding the Foundry project identity to the account's AppID in the "
+            "Web IQ portal remains manual")
 
 
 def signed_in_account(ctx):
@@ -1526,7 +1531,9 @@ def check_search_tier(ctx, subscription, values):
     location, sku = values["search_location"] or values["location"], values["search_sku"]
     result = run(ctx, ["az", "rest", "--method", "post", "--url", SEARCH_OFFERINGS, "--only-show-errors", "--output", "json"])
     try:
-        regions = {region.get("regionName"): {offer.get("name") for offer in region.get("skus") or []}
+        # Each offer names its tier in sku.name, with the tier's limits beside it.
+        regions = {region.get("regionName"): {(offer.get("sku") or {}).get("name") or offer.get("name")
+                                              for offer in region.get("skus") or []}
                    for region in json.loads(result.stdout or "{}").get("regions") or []}
     except (ValueError, AttributeError):
         regions = {}
@@ -1797,8 +1804,9 @@ def phase_platform(ctx):
     if git_token_required(ctx):
         required_outputs(ctx, "github_connect_request")
     principal = ensure_search_identity(ctx, required=True)
-    ctx.log(f"Web IQ account provisioned; connect its resource_id output at {WEB_IQ_PORTAL}. "
-            "AppID onboarding, authenticated search and agent/app integration are not yet verified; see docs/getting-started.md#web-iq.")
+    ctx.log(f"Web IQ account provisioned; connect its resource_id output at {WEB_IQ_PORTAL} to create its AppID. "
+            "After knowledge setup, verify asks you to bind the Foundry project identity to that AppID; Web IQ "
+            "retrieval and agent/app integration are not yet verified; see docs/getting-started.md#web-iq.")
     return (f"{result}; DEV workspace {name} ({workspace}); Search identity {principal}; "
             "workspace bootstrap and knowledge setup pending")
 
@@ -2255,11 +2263,16 @@ def finish_update(ctx, native, name):
     record = native["updates"][name]
     native.setdefault("definitions", {})[name] = record["digest"]
     native.setdefault("commits", {})[name] = record["commit"]
-    # An updated bootstrap notebook runs again, so its new logic takes effect.
+    # An updated bootstrap notebook runs again, so its new logic takes effect, and so does every later notebook that
+    # reads its output.
     if name in {scenario_name(step.item) for step in SCENARIO.runs}:
-        rerun = native.setdefault("rerun", [])
-        if name not in rerun:
-            rerun.append(name)
+        rerun, queued = native.setdefault("rerun", []), {name}
+        for step in SCENARIO.runs:
+            step_name = scenario_name(step.item)
+            if step_name in queued or queued & {scenario_name(item) for item in step.reads}:
+                queued.add(step_name)
+                if step_name not in rerun:
+                    rerun.append(step_name)
     ctx.state.save()
 
 
@@ -2517,18 +2530,19 @@ def phase_bootstrap(ctx):
     ids = resolve_items(ctx, workspace)
     problems = live_binding(ctx, workspace, ids, expected)
     rerun = list(native.get("rerun", ()))
+    if problems:
+        ctx.log("Binding not verified yet (" + "; ".join(problems) + "); running the bootstrap notebooks.")
+    for step in SCENARIO.runs:
+        name = scenario_name(step.item)
+        # Any other notebook is checked on every run: run_notebook skips it once DEV has a completed run of it.
+        if step.binding_chain and not (problems or name in rerun):
+            continue
+        run_notebook(ctx, workspace, ids[step.item], name, receipts, parameters=step.parameters,
+                     skip_completed=step.skip_completed and name not in rerun)
+        if name in rerun:
+            native["rerun"].remove(name)
+            ctx.state.save()
     if problems or rerun:
-        if problems:
-            ctx.log("Binding not verified yet (" + "; ".join(problems) + "); running the bootstrap notebooks.")
-        for step in SCENARIO.runs:
-            name = scenario_name(step.item)
-            if not (problems or name in rerun):
-                continue
-            run_notebook(ctx, workspace, ids[step.item], name, receipts, parameters=step.parameters,
-                         skip_completed=step.skip_completed and name not in rerun)
-            if name in rerun:
-                native["rerun"].remove(name)
-                ctx.state.save()
         problems = live_binding(ctx, workspace, ids, expected)
         if problems:
             raise Blocked("The bootstrap notebooks completed, but the binding is not verified: " + "; ".join(problems))
@@ -2637,7 +2651,7 @@ def search_call(ctx, method, url, body=None, *, user_header=False):
         # The same delegated user token authenticates Search and the live Fabric source.
         headers["x-ms-query-source-authorization"] = token
     try:
-        # Its callers poll or retry within their own budgets, and a public-context retrieval is sent once.
+        # Its callers poll or retry within their own budgets.
         return ctx.http.request(method, url, headers=headers, body=body, timeout=150, attempts=1)
     except TransportError:
         return Response(599)
@@ -2713,7 +2727,13 @@ def ontology_evidence(body, source, facts):
     return problems, {"activity": len(activity), "references": len(references), "facts": list(facts)}
 
 
-def document_evidence(body, name):
+def document_name(reference):
+    """The file name of an indexedOneLake reference's OneLake doc_url."""
+    url = str((reference.get("sourceData") or {}).get("doc_url") or "")
+    return urllib.parse.unquote(urllib.parse.urlsplit(url).path).rsplit("/", 1)[-1]
+
+
+def document_evidence(body, name, document):
     problems = []
     activity = [entry for entry in body.get("activity") or [] if entry.get("type") == "indexedOneLake"
                 and entry.get("knowledgeSourceName") in (None, name)]
@@ -2724,21 +2744,9 @@ def document_evidence(body, name):
         problems.append("the indexedOneLake activity reported an error")
     if not references:
         problems.append("no indexedOneLake reference")
-    return problems, {"activity": len(activity), "references": len(references)}
-
-
-def public_context_evidence(body, name):
-    problems = []
-    activity = [entry for entry in body.get("activity") or [] if entry.get("type") == "mcpServer"
-                and entry.get("knowledgeSourceName") in (None, name)]
-    references = [entry for entry in body.get("references") or [] if entry.get("type") == "mcpServer"]
-    if not activity:
-        problems.append(f"no mcpServer activity for {name}")
-    elif any(entry.get("error") for entry in activity):
-        problems.append("the Web IQ tool call reported an error")
-    if not references:
-        problems.append("no cited Web IQ reference")
-    return problems, {"activity": len(activity), "references": len(references)}
+    elif not any(document_name(entry) == document for entry in references):
+        problems.append(f"no indexedOneLake reference to {document}")
+    return problems, {"activity": len(activity), "references": len(references), "document": document}
 
 
 def save_evidence(ctx, name, body):
@@ -2752,7 +2760,7 @@ def save_evidence(ctx, name, body):
     return path.relative_to(ctx.root)
 
 
-def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intents=False):
+def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intents=False, delay=20):
     """Read-only retrieval with bounded retries; assert structured evidence, never answer text.
 
     A knowledge base at minimal reasoning effort refuses messages: it takes the question as a search intent."""
@@ -2775,9 +2783,9 @@ def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intent
                 raise error
             problems = [error.message]
         ctx.log(f"Retrieval attempt {attempt} did not prove {parameters['kind']}: {'; '.join(problems)}.")
-        if attempt == attempts or ctx.remaining() < 60:
+        if attempt == attempts or ctx.remaining() < delay + 40:
             break
-        ctx.sleep(20)
+        ctx.sleep(delay)
     saved = f"Inspect the last response: {save_evidence(ctx, parameters['kind'] + '-failed', last)}" if last else None
     raise Blocked(f"{parameters['kind']} retrieval is not verified: {'; '.join(problems)}", saved,
                   "Check the knowledge source, your Fabric and Search data access, and RBAC propagation.",
@@ -2785,6 +2793,13 @@ def prove_retrieval(ctx, url, question, parameters, evaluate, attempts=3, intent
 
 
 def verify_web_iq(ctx):
+    """Web IQ's keyless route, without a billable call: the account, the web-iq connection through which the agents'
+    Web IQ tool calls Web IQ's MCP server as the Foundry project identity, and the operator's confirmation that the
+    identity's application (client) ID is bound to the account's AppID.
+
+    Only Agent Service can use the project identity, so the runner can't call Web IQ as it: the agent's cited
+    public-context line in the app is the first proof that Web IQ answers.
+    """
     account, = required_outputs(ctx, "web_iq")
     resource_id = account.get("resource_id") if isinstance(account, dict) else None
     subscription = re.escape(ctx.target("subscription_id"))
@@ -2793,9 +2808,11 @@ def verify_web_iq(ctx):
             resource_id, re.IGNORECASE):
         raise Blocked("The Web IQ output is not an account in the selected subscription.")
     receipt = ctx.state.section("web_iq")
+    # The operator's confirmation outlives each check, and holds only for the identity it names.
+    bound = {key: receipt[key] for key in ("bound_client_id", "bound_confirmed_at") if key in receipt}
     receipt.clear()
     receipt.update(resource_id=resource_id, checked_at=utc_now(), status="provisioning_unverified",
-                   agent_app_integration="unverified")
+                   retrieval="unverified", agent_app_integration="unverified", **bound)
     ctx.state.save()
     url = f"{ARM_API}{resource_id}?api-version={WEB_IQ_API_VERSION}"
     response = arm(ctx, "GET", url)
@@ -2812,47 +2829,52 @@ def verify_web_iq(ctx):
         if state in ("Failed", "Canceled"):
             raise Blocked(f"Web IQ account provisioning failed: {state}.")
         raise Waiting(f"Web IQ account is not provisioned yet: {state}.", "Rerun after provisioning completes.")
-    receipt["status"] = "onboarding_pending"
-    ctx.state.save()
-    key = ctx.environ.get("WEB_IQ_API_KEY", "").strip()
-    if not key:
-        raise Waiting("Web IQ account is provisioned, but authenticated search is unverified.",
-                      f"Sign in to {WEB_IQ_PORTAL}, connect the deployed Web IQ resource and create its AppID/API key.",
-                      "Supply that resource's key only through WEB_IQ_API_KEY on the deployment host, then rerun.",
-                      "Never paste keys into chat, Terraform inputs, files or the browser app; see docs/getting-started.md#web-iq.")
-    if any(ord(character) < 33 or ord(character) > 126 for character in key):
-        raise Blocked("WEB_IQ_API_KEY contains invalid HTTP header characters; supply a valid portal key.")
-    receipt["status"] = "search_unverified"
-    ctx.state.save()
-    response = ctx.http.request("POST", WEB_IQ_SEARCH, headers={"x-apikey": key}, body={
-        "query": WEB_IQ_QUESTION, "maxResults": 3, "contentFormat": "passage",
-        "maxLength": 1000, "safeSearch": "strict", "language": "en", "region": "US",
-    })
+    connection, client, endpoint = (account.get(key) for key in ("connection_name", "client_id", "mcp_endpoint"))
+    if not (connection and client and endpoint):
+        raise Blocked("The web_iq output has no web-iq connection, Web IQ MCP endpoint or Foundry project identity "
+                      "client ID.", "Rerun deploy.py up so the knowledge plan creates them.")
+    client = guid(client, "The web_iq output's client_id")
+    project, = required_outputs(ctx, "foundry_project_id")
+    if not isinstance(project, str) or not re.fullmatch(
+            rf"/subscriptions/{subscription}/resourceGroups/[^/?#]+/providers/Microsoft\.CognitiveServices/accounts/"
+            r"[^/?#]+/projects/[^/?#]+", project, re.IGNORECASE):
+        raise Blocked("The foundry_project_id output is not a Foundry project in the selected subscription.")
+    response = arm(ctx, "GET", f"{ARM_API}{project}/connections/{urllib.parse.quote(connection, safe='')}"
+                               f"?api-version={FOUNDRY_CONNECTION_API_VERSION}")
     if response.status != 200:
-        # Do not echo data-plane error bodies: an upstream service may reflect credentials.
-        raise Blocked(f"Web IQ search failed with HTTP {response.status}; no successful search evidence was recorded.",
-                      "Check portal resource/AppID linking, the key's web permission and rate limits. "
-                      "The runner does not retry a billable search automatically.")
+        raise ServiceError(f"Reading Foundry connection {connection}", response)
     body = response.json(default={})
-    results = body.get("webResults") if isinstance(body, dict) else None
-    if not isinstance(results, list) or not results:
-        raise Blocked("Web IQ returned no web results; authenticated grounding is not verified.")
-    dated = 0
-    for result in results:
-        if not isinstance(result, dict):
-            raise Blocked("Web IQ returned a malformed web result.")
-        source = urllib.parse.urlparse(str(result.get("url") or ""))
-        if (source.scheme not in ("http", "https") or not source.hostname or source.username or source.password
-                or not isinstance(result.get("title"), str) or not result["title"].strip()
-                or not isinstance(result.get("content"), str) or not result["content"].strip()):
-            raise Blocked("Web IQ returned a result without a usable citation or grounding passage.")
-        dated += bool(result.get("crawledAt") or result.get("lastUpdatedAt"))
-    receipt.update(status="search_verified", verified_at=utc_now(), result_count=len(results),
-                   dated_result_count=dated, query=WEB_IQ_QUESTION)
+    settings = body.get("properties") if isinstance(body, dict) else None
+    settings = settings if isinstance(settings, dict) else {}
+    keyless = (settings.get("category") == "RemoteTool" and settings.get("authType") == "ProjectManagedIdentity"
+               and settings.get("target") == endpoint
+               and str(settings.get("audience") or "").rstrip("/") == WEB_IQ_AUDIENCE)
+    if not keyless:
+        raise Blocked(f"Foundry connection {connection} doesn't call {endpoint} keylessly as the project identity.",
+                      "Rerun deploy.py up so the knowledge plan restores it; never give it a Web IQ key.")
+    receipt.update(status="binding_unconfirmed", connection=connection, client_id=client)
     ctx.state.save()
-    return (f"Web IQ public-only search verified ({len(results)} cited passages, {dated} with freshness metadata); "
-            "portal credential/resource association is operator-confirmed; scenario freshness/conflicts and "
-            "agent/app integration remain unverified")
+    bind = (f"In {WEB_IQ_PORTAL}, open the AppID connected to this Web IQ account ({resource_id}); on its "
+            f"Application (Client) IDs tab, select Bind Application (Client) ID and enter {client}, the Foundry "
+            "project identity's application (client) ID.")
+    confirmed = ctx.args.web_iq_bound
+    if confirmed and not same_guid(confirmed, client):
+        raise Blocked(f"--web-iq-bound names {confirmed}, but the Foundry project identity's application (client) ID "
+                      f"is {client}.", bind, f"Then rerun with --web-iq-bound {client}.")
+    if confirmed:
+        receipt.update(bound_client_id=client, bound_confirmed_at=utc_now())
+    elif not same_guid(receipt.get("bound_client_id"), client):
+        raise Waiting("Web IQ is wired keylessly, but nobody has confirmed binding the Foundry project identity to its "
+                      "AppID; until then Web IQ refuses the agents' public-context calls.", bind,
+                      f"Then rerun with --web-iq-bound {client}.",
+                      "The runner can't read the binding: only the agent's cited public-context line in the app "
+                      "proves it.")
+    receipt["status"] = "bound_unverified"
+    ctx.state.save()
+    return (f"Web IQ account provisioned and wired keylessly: the agents' Web IQ tool calls its MCP server through the "
+            f"{connection} connection as the Foundry project identity ({client}), whose AppID binding is "
+            "operator-confirmed; Web IQ retrieval and agent/app integration remain unverified until the agent's "
+            "cited public-context line in the app")
 
 
 def phase_verify(ctx):
@@ -2875,23 +2897,17 @@ def phase_verify(ctx):
         "kind": "fabricOntology", "knowledgeSourceName": source["knowledge_source_name"],
         "includeReferences": True, "includeReferenceSourceData": True},
         lambda body: ontology_evidence(body, source, facts))
-    # The agents' knowledge base runs at minimal effort, so the question goes in as a search intent.
+    # The agents' knowledge base runs at minimal effort, so the question goes in as a search intent. A newly published
+    # document waits for its source's next five-minute indexing run, so this retrieval retries for about six minutes.
     document = prove_retrieval(ctx, knowledge_url(endpoint, "knowledgebases", base, "retrieve", version),
                                ctx.args.document_question, {
         "kind": "indexedOneLake", "knowledgeSourceName": documents,
         "includeReferences": True, "includeReferenceSourceData": True},
-        lambda body: document_evidence(body, documents), intents=True)
+        lambda body: document_evidence(body, documents, ctx.args.document_file), intents=True, attempts=7, delay=60)
     web_iq = verify_web_iq(ctx)
-    public, web_source = required_outputs(ctx, "public_context_knowledge_base_name", "public_context_knowledge_source_name")
-    # One attempt: every retrieval is a billable Web IQ search, which the runner never retries automatically.
-    public_context = prove_retrieval(ctx, knowledge_url(endpoint, "knowledgebases", public, "retrieve", version),
-                                     SCENARIO.public_context_question, {
-        "kind": "mcpServer", "knowledgeSourceName": web_source,
-        "includeReferences": True, "includeReferenceSourceData": True},
-        lambda body: public_context_evidence(body, web_source), attempts=1)
     work_iq = verify_work_iq(ctx)
     ctx.state.section("verify").update(dev_ready_at=utc_now(), ingestion=ingestion, ontology=ontology, documents=document,
-                                       public_context=public_context, work_iq=work_iq)
+                                       work_iq=work_iq)
     ctx.state.save()
     if work_iq["enabled"]:
         mail = (f"Work IQ's {work_iq['connection']} connection is consented for WorkIQAgent.Ask; each user consents to "
@@ -2903,8 +2919,7 @@ def phase_verify(ctx):
         mail = "Work IQ is off (work_iq_enabled = false), so the with-IQ agent has no mail tool"
     return (f"DEV ready: ingestion succeeded for {len(ingestion)} OneLake folder source(s); live ontology retrieval "
             f"through {check_base} and document retrieval through {base} verified with your identity; "
-            f"{web_iq}; Web IQ public context retrieved through Foundry IQ "
-            f"({public_context['references']} cited references); {mail}")
+            f"{web_iq}; {mail}")
 
 
 def verify_work_iq(ctx):
@@ -2992,19 +3007,22 @@ def agent_values(values):
     settings = values.get("agent_settings") or {}
     tools = values.get("foundry_tool_connections") or {}
     fabric = (values.get("fabric_iq_connections") or {}).get(SCENARIO.registration) or {}
-    knowledge, public, mail = ((tools.get(key) or {}) for key in ("knowledge_base", "public_context", "work_iq_mail"))
+    knowledge, public, mail, reprint = ((tools.get(key) or {}) for key in (
+        "knowledge_base", "public_context", "work_iq_mail", "reprint_request"))
     entries = {
         "agent_model_deployment": settings.get("model_deployment"),
         "knowledge_base_mcp_endpoint": knowledge.get("server_url"), "knowledge_base_connection": knowledge.get("name"),
         "public_context_mcp_endpoint": public.get("server_url"), "public_context_connection": public.get("name"),
         "fabric_iq_mcp_endpoint": fabric.get("server_url"), "fabric_iq_connection": fabric.get("name"),
+        "reprint_request_mcp_endpoint": reprint.get("server_url"), "reprint_request_connection": reprint.get("name"),
     }
     if work_iq_enabled(values):
         entries.update(work_iq_mail_mcp_endpoint=mail.get("server_url"), work_iq_mail_connection=mail.get("name"))
     missing = sorted(name for name, value in entries.items() if not value)
     if missing:
         raise Blocked("Agent settings are missing from Terraform outputs: " + ", ".join(missing) + ".",
-                      "Complete the knowledge phase first: the agents' tools need its knowledge bases and connections.")
+                      "Complete the knowledge and reprint phases first: the agents' tools need their knowledge bases, "
+                      "connections and the reprint request server.")
     entries["agent_reasoning_effort"] = settings.get("reasoning_effort")
     return entries
 
@@ -3108,14 +3126,17 @@ def phase_agent(ctx):
             + ("" if work_iq else "; Work IQ is off, so the with-IQ agent has no mail tool"))
 
 
-def app_tag(ctx):
-    """The content digest of the image's inputs at HEAD, after refusing uncommitted or untracked changes to them."""
-    require_committed(ctx, APP_BUILD_PATHS, "the app's build inputs", "the image is built only from committed files")
-    listing = checked(ctx, ["git", "ls-tree", "-r", "HEAD", "--", *APP_BUILD_PATHS], "Listing the app's build inputs",
-                      quiet=True)
+def content_tag(ctx, paths, inputs):
+    """The content digest of an image's inputs at HEAD, after refusing uncommitted or untracked changes to them."""
+    require_committed(ctx, paths, inputs, "the image is built only from committed files")
+    listing = checked(ctx, ["git", "ls-tree", "-r", "HEAD", "--", *paths], f"Listing {inputs}", quiet=True)
     if not listing.stdout.strip():
-        raise Blocked("HEAD holds none of the app's build inputs.")
+        raise Blocked(f"HEAD holds none of {inputs}.")
     return hashlib.sha256(listing.stdout.encode()).hexdigest()[:12]
+
+
+def app_tag(ctx):
+    return content_tag(ctx, APP_BUILD_PATHS, "the app's build inputs")
 
 
 def image_built(ctx, registry, repository, tag):
@@ -3132,27 +3153,38 @@ def image_built(ctx, registry, repository, tag):
         raise Blocked("az acr repository show-tags did not return JSON.") from None
 
 
-APP_IMAGE_TAG_LINE = re.compile(r'(?m)^app_image_tag[ \t]*=[ \t]*(null|"[0-9a-f]{12}")[ \t]*(?:#[^\r\n]*)?\r?$')
+# The tfvars variables that hold the tag of an image the runner built, null until it is built.
+IMAGE_TAG_VARIABLES = ("app_image_tag", "reprint_image_tag")
 
 
-def app_image_tag_line(ctx):
-    """The one top-level app_image_tag line of infra/terraform.tfvars, and the file's bytes."""
+def image_tag_line(ctx, name):
+    """The one top-level `name` line of infra/terraform.tfvars, and the file's bytes."""
+    if name not in IMAGE_TAG_VARIABLES:
+        raise Blocked(f"{name} is not an image tag variable.")
     path = ctx.infra / "terraform.tfvars"
     if path.is_symlink():
         raise Blocked("Refusing to update a symlinked infra/terraform.tfvars.")
     original = path.read_bytes()
     text = original.decode("utf-8")
-    match = APP_IMAGE_TAG_LINE.search(text)
-    if len(re.findall(r"(?m)^app_image_tag[ \t]*=", text)) != 1 or not match:
-        raise Blocked("infra/terraform.tfvars needs exactly one top-level app_image_tag line, null or a 12-character tag.",
-                      "Add `app_image_tag = null` as in infra/terraform.tfvars.example, then rerun deploy.py up.")
+    match = re.search(rf'(?m)^{name}[ \t]*=[ \t]*(null|"[0-9a-f]{{12}}")[ \t]*(?:#[^\r\n]*)?\r?$', text)
+    if len(re.findall(rf"(?m)^{name}[ \t]*=", text)) != 1 or not match:
+        raise Blocked(f"infra/terraform.tfvars needs exactly one top-level {name} line, null or a 12-character tag.",
+                      f"Add `{name} = null` as in infra/terraform.tfvars.example, then rerun deploy.py up.")
     return match, original
 
 
+def app_image_tag_line(ctx):
+    return image_tag_line(ctx, "app_image_tag")
+
+
 def set_app_image_tag(ctx, tag):
-    """Write the built tag into infra/terraform.tfvars, replacing only its one app_image_tag value."""
+    return set_image_tag(ctx, "app_image_tag", tag)
+
+
+def set_image_tag(ctx, name, tag):
+    """Write the built tag into infra/terraform.tfvars, replacing only its one `name` value."""
     path = ctx.infra / "terraform.tfvars"
-    match, original = app_image_tag_line(ctx)
+    match, original = image_tag_line(ctx, name)
     text = original.decode("utf-8")
     value = json.dumps(tag)
     if match.group(1) == value:
@@ -3188,6 +3220,32 @@ def wait_healthy(ctx, origin):
                   "Azure portal if it doesn't. Then rerun deploy.py up.")
 
 
+def build_image(ctx, registry, repository, tag, context, approval, receipts):
+    """Build repository:tag once, with ACR Tasks, from this checkout's committed context/ and its Dockerfile."""
+    if image_built(ctx, registry, repository, tag):
+        return
+    approve(ctx, approval, f"Build image {repository}:{tag} from this checkout's committed {context}/ in "
+                           f"registry {registry} with ACR Tasks")
+    receipts["build"] = {"tag": tag, "started_at": utc_now()}
+    ctx.state.save()
+    # For a local context, az acr build reads --file from the working directory, the repository root, and uploads
+    # it beside the context, which its .dockerignore filters.
+    result = run(ctx, ["az", "acr", "build", "--registry", registry, "--image", f"{repository}:{tag}",
+                       "--file", f"{context}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
+                       context], stream=True)
+    if result.code:
+        raise Blocked(f"az acr build failed (exit {result.code}).\n{tail(result.stdout)}",
+                      "Fix the build, commit, then rerun deploy.py up. A registry's rate limit on a base image "
+                      "(toomanyrequests) passes: rerun later.",
+                      "Where ACR Tasks is unavailable, build and "
+                      f"push {repository}:{tag} with Docker (az acr login --name {registry}): the runner then finds it.",
+                      detail=result.stdout)
+    if not image_built(ctx, registry, repository, tag):
+        raise Blocked(f"ACR Tasks finished, but {repository}:{tag} is not in registry {registry}.")
+    receipts["build"]["completed_at"] = utc_now()
+    ctx.state.save()
+
+
 def phase_app(ctx):
     registry, = required_outputs(ctx, "container_registry")
     name, repository = registry.get("name"), registry.get("repository")
@@ -3199,27 +3257,7 @@ def phase_app(ctx):
     tag = app_tag(ctx)
     app_image_tag_line(ctx)
     receipts = ctx.state.section("app")
-    if not image_built(ctx, name, repository, tag):
-        approve(ctx, "app-build", f"Build image {repository}:{tag} from this checkout's committed {APP_CONTEXT}/ in "
-                                  f"registry {name} with ACR Tasks")
-        receipts["build"] = {"tag": tag, "started_at": utc_now()}
-        ctx.state.save()
-        # For a local context, az acr build reads --file from the working directory, the repository root, and uploads
-        # it beside the context, which its .dockerignore filters.
-        result = run(ctx, ["az", "acr", "build", "--registry", name, "--image", f"{repository}:{tag}",
-                           "--file", f"{APP_CONTEXT}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
-                           APP_CONTEXT], stream=True)
-        if result.code:
-            raise Blocked(f"az acr build failed (exit {result.code}).\n{tail(result.stdout)}",
-                          "Fix the build, commit, then rerun deploy.py up. A registry's rate limit on a base image "
-                          "(toomanyrequests) passes: rerun later.",
-                          "Where ACR Tasks is unavailable, build and "
-                          f"push {repository}:{tag} with Docker (az acr login --name {name}): the runner then finds it.",
-                          detail=result.stdout)
-        if not image_built(ctx, name, repository, tag):
-            raise Blocked(f"ACR Tasks finished, but {repository}:{tag} is not in registry {name}.")
-        receipts["build"]["completed_at"] = utc_now()
-        ctx.state.save()
+    build_image(ctx, name, repository, tag, APP_CONTEXT, "app-build", receipts)
 
     def record_tag():
         # Only after the plan's approval: an earlier phase's full plan must not deploy an unapproved image.
@@ -3242,6 +3280,189 @@ def phase_app(ctx):
     return (f"{result}; {origin} runs {repository}:{tag} and answers its health check with this deployment's sign-in "
             f"registration; {consent}. Open it and sign in: not proof of consent to the agents' tools or of an answer "
             "(next steps)")
+
+
+# The approval-gated reprint request server, built from its committed directory like the app.
+REPRINT_CONTEXT = "scenario/workflows/reprint-request"
+REPRINT_BUILD_PATHS = (REPRINT_CONTEXT,)
+# Microsoft Graph: the reprint-request connection also asks for offline_access, so Foundry can renew each user's token.
+GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+# The server identity's only KQL database roles, as .add names them and as .show reports them: it reads the governed
+# rows and its own requests, and appends requests.
+REPRINT_ROLES = {"viewers": "Viewer", "ingestors": "Ingestor"}
+# Kusto's documented token audience, when an endpoint's sign-in metadata names none.
+KUSTO_RESOURCE = "https://kusto.kusto.windows.net"
+KUSTO_ORIGIN = re.compile(r"https://[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\.kusto\.fabric\.microsoft\.com")
+# A Kusto database name the runner embeds in a command: a GUID or a plain display name, never a quote or bracket.
+KUSTO_DATABASE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,259}")
+REPRINT_READY_ATTEMPTS = 18
+
+
+def kusto_resource(ctx, origin):
+    """The audience of a Kusto endpoint's tokens, as its own sign-in metadata names it."""
+    cached = ctx.cache.setdefault("kusto_resources", {})
+    if origin not in cached:
+        response = ctx.http.request("GET", f"{origin}/v1/rest/auth/metadata", timeout=30)
+        # Like Kusto's SDKs, an endpoint without sign-in metadata takes the documented audience.
+        if response.status not in (200, 404):
+            raise ServiceError("Reading the KQL endpoint's sign-in metadata", response)
+        metadata = response.json(default={}) if response.status == 200 else {}
+        resource = str(((metadata or {}).get("AzureAD") or {}).get("KustoServiceResourceId")
+                       or KUSTO_RESOURCE).rstrip("/")
+        if not re.fullmatch(r"https://[a-z0-9.-]+", resource):
+            raise Blocked("The KQL endpoint names an unexpected token audience.")
+        cached[origin] = resource
+    return cached[origin]
+
+
+def kusto(ctx, origin, command, label, database=None):
+    """One KQL management command as the deployer: the rows of its first result table, as dicts."""
+    token = access_token(ctx, resource=kusto_resource(ctx, origin))
+    if not token:
+        raise Waiting("Azure CLI could not get a KQL token for you.",
+                      "Sign in again with az login as the deploying user, then rerun deploy.py up.")
+    body = {"csl": command, **({"db": database} if database else {})}
+    response = ctx.http.request("POST", f"{origin}/v1/rest/mgmt", headers={"Authorization": f"Bearer {token}"},
+                                body=body, timeout=60)
+    if response.status != 200:
+        raise ServiceError(label, response)
+    tables = (response.json(default={}) or {}).get("Tables")
+    if not isinstance(tables, list) or not tables or not isinstance(tables[0], dict):
+        raise Blocked(f"{label} returned no result table.")
+    columns = [column.get("ColumnName") for column in tables[0].get("Columns") or [] if isinstance(column, dict)]
+    return [dict(zip(columns, row)) for row in tables[0].get("Rows") or [] if isinstance(row, list)]
+
+
+def reprint_database(ctx, workspace, item):
+    """The DEV KQL database the reprint server records requests in: its query URI and Kusto database name."""
+    found = fabric_json(ctx, "GET", f"/v1/workspaces/{workspace}/kqlDatabases/{item}", label="Reading the KQL database")
+    origin = str((found.get("properties") or {}).get("queryServiceUri") or "").rstrip("/")
+    if not same_guid(found.get("workspaceId"), workspace) or not KUSTO_ORIGIN.fullmatch(origin):
+        raise Blocked("The KQL database is outside DEV or has no Fabric query URI.")
+    display = scenario_name("kql")
+    # Fabric names a database by its item ID or its display name; Kusto accepts either, and .show reports both.
+    names = {row.get("DatabaseName") for row in kusto(ctx, origin, ".show databases", "Listing the eventhouse's databases")
+             if display in (row.get("DatabaseName"), row.get("PrettyName")) or same_guid(row.get("DatabaseName"), item)}
+    if len(names) != 1 or not KUSTO_DATABASE.fullmatch(str(next(iter(names)) or "")):
+        raise Blocked(f"The eventhouse does not list exactly one {display} database you can manage.")
+    return {"origin": origin, "name": next(iter(names)), "item": item}
+
+
+def ensure_reprint_roles(ctx, database, identity):
+    """Grant the server's identity Database Viewer and Ingestor on the KQL database as the deployer, once."""
+    principal = f"aadapp={guid(identity, 'reprint server identity')};{guid(ctx.target('tenant_id'), 'tenant')}"
+    name = database["name"]
+    commands = [f".add database ['{name}'] {command} ('{principal}') 'reprint request server'" for command in REPRINT_ROLES]
+
+    def command(csl, label):
+        try:
+            return kusto(ctx, database["origin"], csl, label, name)
+        except ServiceError as error:
+            if error.status not in (401, 403):
+                raise
+            raise MissingPermission(
+                f"{error.message} You can't manage the {scenario_name('kql')} KQL database's principals.",
+                f"After the grant, rerun deploy.py {ctx.args.command}; completed work is not repeated.",
+                grants=[f"A DEV workspace Admin or Member, or an admin of the {scenario_name('kql')} KQL database, "
+                        "either makes you a workspace Contributor or higher, or runs in that database: "
+                        + " and ".join(commands)]) from None
+
+    def held():
+        rows = command(f".show database ['{name}'] principals", "Reading the KQL database's principals")
+        # A role reads like "Database BookSignals Viewer"; the identity's FQN is aadapp=<client ID>;<tenant>.
+        return {str(row.get("Role") or "").split()[-1] for row in rows if str(row.get("Role") or "").split()
+                and str(row.get("PrincipalFQN") or "").lower().startswith(f"aadapp={identity.lower()}")}
+
+    missing = [role for role, shown in REPRINT_ROLES.items() if shown not in held()]
+    if missing:
+        approve(ctx, "reprint-roles", f"Grant the reprint server's identity ({identity}) "
+                                      + " and ".join(f"Database {REPRINT_ROLES[role]}" for role in missing)
+                                      + f" on KQL database {scenario_name('kql')} in DEV, as you")
+        for role in missing:
+            command(f".add database ['{name}'] {role} ('{principal}') 'reprint request server'",
+                    f"Granting the reprint server's identity Database {REPRINT_ROLES[role]}")
+        if any(role not in held() for role in REPRINT_ROLES.values()):
+            raise Blocked("The KQL database does not list the reprint server's roles after granting them.")
+        ctx.state.section("reprint")["roles"] = {"database": name, "identity": identity, "granted_at": utc_now()}
+        ctx.state.save()
+    return "granted now" if missing else "already held"
+
+
+def reprint_registration(ctx):
+    """The reprint_request output: the server's endpoint, registrations and identity."""
+    registration, = required_outputs(ctx, "reprint_request")
+    if not same_guid(registration.get("tenant_id"), ctx.target("tenant_id")):
+        raise Blocked("The reprint server's registrations are in another tenant than the signed-in deployment tenant.")
+    for key in ("mcp_endpoint", "connection_name", "oauth_redirect_url", "api_client_id", "client_id",
+                "service_principal_object_id", "identity_client_id", "repository"):
+        if not registration.get(key):
+            raise Blocked(f"The reprint_request output has no {key}.", "Rerun deploy.py up so the platform plan creates "
+                          "the reprint server's registrations, identity and connection.")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._/-]{0,127}", registration["repository"]):
+        raise Blocked("The reprint_request output names an invalid image repository.")
+    return registration
+
+
+def wait_reprint_ready(ctx, origin):
+    """Wait until the server answers and, as its own identity, sees both its KQL roles."""
+    wait_healthy(ctx, origin)
+    for attempt in range(REPRINT_READY_ATTEMPTS):
+        if attempt:
+            ctx.sleep(10)
+        try:
+            response = ctx.http.request("GET", f"{origin}/readyz", timeout=30, attempts=1)
+        except TransportError:
+            continue
+        body = response.json(default={}) or {}
+        roles = body.get("roles") if isinstance(body, dict) else None
+        if (response.status == 200 and body.get("ready") is True and isinstance(roles, list)
+                and set(REPRINT_ROLES.values()) <= set(roles)):
+            return sorted(roles)
+    raise Waiting(f"{origin} does not see its KQL database roles yet.",
+                  "A new KQL role can take a few minutes to apply. Rerun deploy.py up; if it persists, inspect the "
+                  "container app's logs.")
+
+
+def phase_reprint(ctx):
+    registry, = required_outputs(ctx, "container_registry")
+    name = registry.get("name")
+    if not (isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9]{5,50}", name)):
+        raise Blocked("The container_registry output is incomplete.")
+    registration = reprint_registration(ctx)
+    repository = registration["repository"]
+    tag = content_tag(ctx, REPRINT_BUILD_PATHS, "the reprint server's build inputs")
+    image_tag_line(ctx, "reprint_image_tag")
+    workspace = guid(required_outputs(ctx, "dev_workspace_id")[0], "dev_workspace_id")
+    database = reprint_database(ctx, workspace, resolve_items(ctx, workspace)["kql"])
+    roles = ensure_reprint_roles(ctx, database, registration["identity_client_id"])
+    receipts = ctx.state.section("reprint")
+    build_image(ctx, name, repository, tag, REPRINT_CONTEXT, "reprint-build", receipts)
+
+    def record_tag():
+        # Only after the plan's approval: an earlier phase's full plan must not deploy an unapproved image.
+        if set_image_tag(ctx, "reprint_image_tag", tag):
+            ctx.log(f'Set reprint_image_tag = "{tag}" in infra/terraform.tfvars.')
+            ctx.forget()
+
+    result = converge(ctx, "reprint", variables={"reprint_image_tag": tag}, before_apply=record_tag)
+    current = reprint_registration(ctx)
+    if current.get("image_tag") != tag or not current.get("url"):
+        raise Blocked("The reprint_request output does not run the built image yet; review the reprint plan.")
+    origin = https_origin(current["url"], "reprint_request.url")
+    if current["mcp_endpoint"] != f"{origin}/mcp":
+        raise Blocked("The reprint server's URL differs from the endpoint its connection names.")
+    seen = wait_reprint_ready(ctx, origin)
+    # Each user still signs in once through Foundry's link; the tenant-wide grant spares them Entra's consent screen.
+    ensure_consent(ctx, current, current["api_client_id"], "the reprint server's ReprintRequest.Submit")
+    ensure_consent(ctx, {**current, "delegated_scopes": ["offline_access"]}, GRAPH_APP_ID,
+                   "Microsoft Graph's offline_access for the reprint-request connection")
+    receipts.update(url=origin, image_tag=tag, database=database["name"], verified_at=utc_now())
+    ctx.state.save()
+    return (f"{result}; {origin} runs {repository}:{tag}, and its identity sees {' and '.join(seen)} on KQL database "
+            f"{scenario_name('kql')} ({roles}); the {current['connection_name']} connection's client is granted "
+            "ReprintRequest.Submit and offline_access tenant-wide, and Terraform gives you the Publishing director "
+            "approval role. Not proof of a write: each user signs in once for the reprint tool, and only an approved "
+            "request in the app records one")
 
 
 def teardown_snapshot(ctx):
@@ -3375,14 +3596,15 @@ def teardown_next(snapshot):
         steps.append(f"Fabric tenant admin: permanently delete retained workspaces in OneLake catalog > Govern > "
                      f"Workspaces ({workspaces}). Retention is not immediate data erasure.")
     steps.append("Microsoft Entra keeps the deleted app registrations (the Fabric user-auth one, the app's sign-in "
-                 "registration and, with Work IQ, Work IQ's) under Deleted applications for 30 days; restore or "
-                 "permanently delete them there. Tenant-wide and users' consents are removed with their service "
-                 "principals.")
+                 "registration, the reprint server's API and OAuth client and, with Work IQ, Work IQ's) under Deleted "
+                 "applications for 30 days; restore or permanently delete them there. Tenant-wide and users' consents "
+                 "and approval roles are removed with their service principals.")
     if snapshot.get("agents"):
         steps.append("The Foundry agents (" + ", ".join(snapshot["agents"]) + ") and their stored runs were deleted with "
                      "the Foundry project, and the purge removed the account.")
     steps += [
-        "Revoke the Web IQ AppID's keys and remove its portal profile at https://webiq.microsoft.ai/profiles.",
+        "Unbind the deleted Foundry project identity's client ID from the Web IQ AppID, revoke any keys and remove its "
+        "portal profile at https://webiq.microsoft.ai/profiles.",
         "Keep Terraform state, tfvars and receipts until cleanup is confirmed. GitHub, backend storage, tenant settings, "
         "licenses, external source data and service-retained backups/audit records are not deleted.",
     ]
@@ -3521,7 +3743,8 @@ def as_missing_permission(ctx, phase, stop):
 PHASE_FUNCTIONS = {
     "signin": phase_signin, "config": phase_config, "preflight": phase_preflight, "identity": phase_identity,
     "consent": phase_consent, "platform": phase_platform, "bootstrap": phase_bootstrap,
-    "knowledge": phase_knowledge, "verify": phase_verify, "agent": phase_agent, "app": phase_app,
+    "knowledge": phase_knowledge, "verify": phase_verify, "reprint": phase_reprint, "agent": phase_agent,
+    "app": phase_app,
     "destroy": phase_destroy,
 }
 
@@ -3629,6 +3852,14 @@ def approvals(values, parser):
     return granted
 
 
+def client_id_argument(value):
+    """An application (client) ID argument, normalized like the GUIDs the runner prints."""
+    try:
+        return str(UUID(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an application (client) ID (a GUID)") from None
+
+
 def parse_arguments(argv):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="print the final report as JSON on stdout")
@@ -3665,13 +3896,19 @@ def parse_arguments(argv):
     group.add_argument("--consent-confirmed", action="store_true",
                        help="an administrator confirmed consent and this sign-in cannot read grants to verify it")
     group.add_argument("--bootstrap-fallback", choices=("notebooks",),
-                       help="if plan attachment is FeatureNotAvailable, import/sync without it and run Seed then Bind")
+                       help="if plan attachment is FeatureNotAvailable, import/sync without it and run the bootstrap "
+                            "notebooks as you")
     group.add_argument("--update-definitions", action="store_true",
                        help="replace changed definitions of deployed notebooks, ontologies and deployment plans "
                             "after an exact item-update approval (native import only; never lakehouses)")
+    group.add_argument("--web-iq-bound", type=client_id_argument, metavar="CLIENT_ID",
+                       help="you bound this Foundry project identity's application (client) ID, which verify prints, "
+                            "to the Web IQ account's AppID in the Web IQ portal")
     group = deployment.add_argument_group("readiness evidence")
     group.add_argument("--ontology-question", default=SCENARIO.ontology_question)
     group.add_argument("--document-question", default=SCENARIO.document_question)
+    group.add_argument("--document-file", default=SCENARIO.document_file,
+                       help="file name in the documents folder whose passage must answer --document-question")
     group.add_argument("--expect", action="append", help="fact required in live ontology source data (repeatable)")
     parser = Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True, parser_class=Parser)

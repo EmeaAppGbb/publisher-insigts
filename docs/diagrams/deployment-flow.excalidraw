@@ -33,7 +33,7 @@
       "locked": true,
       "customData": {
         "title": "From repository to a running app",
-        "description": "Read each row left to right, then continue down. Steps 1-3 configure a derived repository, approve the Entra-only identity plan, and obtain administrator consent and user sign-in. Steps 4-6 approve the untargeted platform plan, synchronize all five DEV items with Bootstrap explicitly attached, and verify local data and physical item IDs. Steps 7-9 approve the full knowledge plan, wait for each document folder's ingestion, prove document, live-fact and public-context retrieval, and report DEV ready only with evidence. Step 10 publishes the two Foundry prompt agents after one agent-publish approval, giving only changed definitions a new version, then builds the web app's image with ACR Tasks after an app-build approval and applies the reviewed app plan. The runner checks that each agent runs its reviewed definition and that the app answers its health check and serves this deployment's sign-in registration; the user's own sign-in and question at the app URL come last. Four saved-plan approvals stay separate from consent, Git review and the publish and build approvals. TEST promotion, other users' access and second-user isolation remain separate.",
+        "description": "Read each row left to right, then continue down. Steps 1-3 configure a derived repository, approve the Entra-only identity plan, and obtain administrator consent and user sign-in. Steps 4-6 approve the untargeted platform plan, synchronize all five DEV items with Bootstrap explicitly attached, and verify local data and physical item IDs. Steps 7-9 approve the full knowledge plan, wait for each document folder's ingestion, prove document and live-fact retrieval, check the keyless Web IQ wiring and the confirmed binding, and report DEV ready only with evidence. Step 10 publishes the two Foundry prompt agents after one agent-publish approval, giving only changed definitions a new version, then builds the web app's image with ACR Tasks after an app-build approval and applies the reviewed app plan. The runner checks that each agent runs its reviewed definition and that the app answers its health check and serves this deployment's sign-in registration; the user's own sign-in and question at the app URL come last. Four saved-plan approvals stay separate from consent, Git review and the publish and build approvals. TEST promotion, other users' access and second-user isolation remain separate.",
         "role": "page"
       },
       "index": "a0"
@@ -2690,8 +2690,8 @@
       "locked": false,
       "fontSize": 19,
       "fontFamily": 2,
-      "text": "Wait for each folder's ingestion.\nDocs, live facts, public context.",
-      "originalText": "Wait for each folder's ingestion.\nDocs, live facts, public context.",
+      "text": "Wait for each folder's ingestion.\nDocs, live facts; Web IQ wiring.",
+      "originalText": "Wait for each folder's ingestion.\nDocs, live facts; Web IQ wiring.",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,

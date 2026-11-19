@@ -1,0 +1,35 @@
+relationship EditionTitle
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: editions.title_id
+	toColumn: titles.title_id
+
+relationship SignalTitle
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: title_signals.title_id
+	toColumn: titles.title_id
+
+relationship OptionSignal
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: decision_options.signal_id
+	toColumn: title_signals.signal_id
+
+relationship PerformanceTitle
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: title_performance.title_id
+	toColumn: titles.title_id
+
+relationship CampaignTitle
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: campaigns.title_id
+	toColumn: titles.title_id
+
+relationship RequestEdition
+	fromCardinality: many
+	toCardinality: one
+	fromColumn: reprint_requests.edition_id
+	toColumn: editions.edition_id

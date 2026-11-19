@@ -1,0 +1,11 @@
+{
+  "type": "mcp",
+  "server_label": "reprint_request",
+  "server_description": "Submit one reprint request to production planning, only when the user asks to submit or raise one. The user approves the exact request in the app before it is sent; the server records it as them, after checking their approval authority. First ask Fabric IQ for the current week's inventory risk and its reprint options, then call submit_reprint_request once with the chosen option's exact values: signal_id, option_id, edition_id, territory, units as quantity, whether it is expedited and investment_gbp. Add a one or two sentence rationale, and evidence that names the signal and the policy sections that govern it. Never use it for a reallocation, a pause, marketing or any other change. Report the request it returns, or its refusal, as it states it.",
+  "server_url": "{{reprint_request_mcp_endpoint}}",
+  "project_connection_id": "{{reprint_request_connection}}",
+  "allowed_tools": [
+    "submit_reprint_request"
+  ],
+  "require_approval": "always"
+}

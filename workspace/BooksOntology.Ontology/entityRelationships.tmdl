@@ -1,0 +1,47 @@
+/// An edition is a format of a title.
+entityRelationship EditionOf
+	lineageTag: 77f3665d-ee18-43a6-a690-66aeca54451a
+	fromEntity: Edition
+	toEntity: Title
+	backingConfiguration
+		relationship: EditionTitle
+
+/// A signal concerns a title.
+entityRelationship SignalFor
+	lineageTag: 0af3254c-28cd-4c1c-966d-5ad27c8b60b5
+	fromEntity: TitleSignal
+	toEntity: Title
+	backingConfiguration
+		relationship: SignalTitle
+
+/// An option responds to a signal.
+entityRelationship OptionFor
+	lineageTag: 51fbc9b1-fafe-4c7f-8cc2-fec66e6fde64
+	fromEntity: DecisionOption
+	toEntity: TitleSignal
+	backingConfiguration
+		relationship: OptionSignal
+
+/// A performance row describes a title.
+entityRelationship PerformanceOf
+	lineageTag: fdb07f6a-4add-4ea8-b3a3-ae6c68fc76b9
+	fromEntity: TitlePerformance
+	toEntity: Title
+	backingConfiguration
+		relationship: PerformanceTitle
+
+/// A campaign promotes a title.
+entityRelationship Promotes
+	lineageTag: bc89a78b-cd86-4f4d-902f-8269cff401e0
+	fromEntity: Campaign
+	toEntity: Title
+	backingConfiguration
+		relationship: CampaignTitle
+
+/// A reprint request is for an edition.
+entityRelationship ReprintOf
+	lineageTag: 2f364200-db33-48d6-8593-d96039b6cffa
+	fromEntity: ReprintRequest
+	toEntity: Edition
+	backingConfiguration
+		relationship: RequestEdition

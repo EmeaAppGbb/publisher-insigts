@@ -1,37 +1,72 @@
 $schema: https://developer.microsoft.com/json-schemas/fabric/item/deploymentPlan/definition/plan/1.0.0/schema.json
 version: 1.0.0
 groups:
-  - name: Scenario
-    logicalId: 094b6f1f-2619-41ad-b7c8-79cc62f71bf1
-  - name: SeedScenario
-    logicalId: b51938f9-c50b-4e93-b769-7e03b02eda7b
+  - name: Books
+    logicalId: 758429ae-f72b-4aae-921e-23d7c85f5cf3
+  - name: SeedBooks
+    logicalId: c8334dd2-4437-4c1f-9e3f-b402a9011d0c
     dependsOn:
-      - groupName: Scenario
+      - groupName: Books
     postActions:
-      - name: Seed demo data
+      - name: Seed fictional book data
         job:
           type: Execute
-          logicalId: b51938f9-c50b-4e93-b769-7e03b02eda7b
+          logicalId: c8334dd2-4437-4c1f-9e3f-b402a9011d0c
           parameters:
             - name: lakehouse_name
-              value: Scenario
+              value: Books
             - name: allow_other_workspaces
               value: false
-  - name: ScenarioOntology
-    logicalId: e6a99499-e3f5-4a9b-8288-3985c73a05e5
+  - name: BookEvents
+    logicalId: 2be4d554-4185-47ae-9d6d-2d79c49a2992
+  - name: BookSignals
+    logicalId: 042d6a15-62ec-4c64-9989-e12f7fadf253
     dependsOn:
-      - groupName: SeedScenario
-  - name: BindScenario
-    logicalId: 52c47324-b4ec-4504-b6af-62fbf6ead50f
+      - groupName: BookEvents
+  - name: ComputeBookSignals
+    logicalId: 0fdeff35-5d26-490a-9280-be08db7f167c
     dependsOn:
-      - groupName: ScenarioOntology
+      - groupName: SeedBooks
+      - groupName: BookSignals
     postActions:
-      - name: Bind seeded ontology
+      - name: Compute the latest week's signals
         job:
           type: Execute
-          logicalId: 52c47324-b4ec-4504-b6af-62fbf6ead50f
+          logicalId: 0fdeff35-5d26-490a-9280-be08db7f167c
           parameters:
             - name: lakehouse_name
-              value: Scenario
+              value: Books
+            - name: kql_database_name
+              value: BookSignals
+  - name: BooksOntology
+    logicalId: 0291970c-8a8b-4481-b30b-ed6a309d2368
+    dependsOn:
+      - groupName: ComputeBookSignals
+  - name: BindBooks
+    logicalId: b46187c3-8831-49fe-b138-a1edb0f64897
+    dependsOn:
+      - groupName: BooksOntology
+    postActions:
+      - name: Bind the books ontology
+        job:
+          type: Execute
+          logicalId: b46187c3-8831-49fe-b138-a1edb0f64897
+          parameters:
+            - name: lakehouse_name
+              value: Books
             - name: ontology_name
-              value: ScenarioOntology
+              value: BooksOntology
+  - name: PublishBooksKnowledge
+    logicalId: 7e20d9b3-f69a-4e6d-af75-74a459e2ccc0
+    dependsOn:
+      - groupName: Books
+    postActions:
+      - name: Publish the approved documents
+        job:
+          type: Execute
+          logicalId: 7e20d9b3-f69a-4e6d-af75-74a459e2ccc0
+          parameters:
+            - name: lakehouse_name
+              value: Books
+            - name: allow_other_workspaces
+              value: false

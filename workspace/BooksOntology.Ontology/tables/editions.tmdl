@@ -1,0 +1,46 @@
+table editions
+	lineageTag: 426ffd76-5aa4-48e3-b369-986430a46004
+
+	column edition_id
+		dataType: string
+		sourceColumn: edition_id
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column format
+		dataType: string
+		sourceColumn: format
+
+	column list_price_gbp
+		dataType: double
+		sourceColumn: list_price_gbp
+
+	column net_price_gbp
+		dataType: double
+		sourceColumn: net_price_gbp
+
+	column unit_cost_gbp
+		dataType: double
+		sourceColumn: unit_cost_gbp
+
+	column printer
+		dataType: string
+		sourceColumn: printer
+
+	column reprint_lead_time_days
+		dataType: int64
+		sourceColumn: reprint_lead_time_days
+
+	column expedited_lead_time_days
+		dataType: int64
+		sourceColumn: expedited_lead_time_days
+
+	column expedite_premium_gbp
+		dataType: double
+		sourceColumn: expedite_premium_gbp
+
+	column reprint_minimum_units
+		dataType: int64
+		sourceColumn: reprint_minimum_units

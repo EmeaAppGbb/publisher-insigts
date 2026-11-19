@@ -15,16 +15,17 @@ knowledge_ontologies   = {}
 # Leave it null until then; the container app exists only once it is set.
 app_image_tag = null
 
+# deploy.py's reprint phase sets this to the tag of the reprint request server image it built: a digest of
+# scenario/workflows/reprint-request's committed files. Leave it null until then.
+reprint_image_tag = null
+
 # Web IQ is deployed with every platform. Set true only after accepting its terms.
 # Read preparation.md: paid subscription, public global service,
-# preview terms and manual portal AppID linking. The with-IQ agent's Web IQ tool
-# reads public context through its own knowledge base.
+# preview terms and manual portal onboarding. The with-IQ agent's Web IQ tool
+# calls Web IQ's MCP server for public context, keyless: Foundry calls it as the
+# project identity, once you bind that identity's client ID (the web_iq output's
+# client_id, after knowledge setup) to the account's AppID in the Web IQ portal.
 web_iq_terms_accepted = false
-# The runner's public-only search probe reads WEB_IQ_API_KEY from the environment.
-# After knowledge setup, the runner also passes it to Terraform as the write-only
-# web_iq_api_key for the public-context knowledge source. After rotating the key, increment:
-# web_iq_api_key_version = 2
-# Never put that key in tfvars, source control or the browser app.
 
 # Work IQ, the with-IQ agent's mail tool, reads each user's own mail as that user. Set true only
 # with a Microsoft 365 mailbox per user, a Copilot Credits spending policy covering the Work IQ
@@ -37,12 +38,13 @@ work_iq_enabled = false
 # Performance profile: the defaults favour demo speed. The agents run on their own agent
 # deployment (agent_model) at low agent_reasoning_effort, the agents' knowledge base retrieves
 # at minimal effort with extractive output, and the app keeps one warm replica. Fabric IQ
-# queries run on the Fabric capacity (fabric_capacity_sku); Web IQ public-context calls plan
-# and synthesize on chat_model, so raise chat_model's capacity if they return HTTP 429.
+# queries run on the Fabric capacity (fabric_capacity_sku); verify's ontology check plans
+# and synthesizes on chat_model, so raise chat_model's capacity if it returns HTTP 429.
 # GlobalStandard model deployments bill per token, so unused model capacity costs nothing.
 # For lower cost, set app = { min_replicas = 0 } between sessions (the first question then
 # waits for a cold start), keep a smaller Fabric capacity and pause it when idle.
 # agent_model            = { capacity = 100 }
+# reprint_min_replicas   = 0 # the reprint request server's first call then waits for a cold start
 # agent_reasoning_effort = "low"
 # chat_model             = { capacity = 50 }
 # app                    = { min_replicas = 1 }
@@ -68,13 +70,13 @@ work_iq_enabled = false
 # An administrator grants consent; sign in with the generated scope before a full plan.
 # The first full apply creates the platform, not the workspace items.
 # After Bootstrap and successful seed/binding runs, replace null with the
-# DEV Scenario lakehouse's physical GUID (not its .platform logicalId) and apply again.
+# DEV Books lakehouse's physical GUID (not its .platform logicalId) and apply again.
 # Register the bound ontology in that same knowledge apply. It joins only the
 # check-only knowledge base <project_name>-ontology-check, never the agents' one:
 # knowledge_ontologies = {
 #   scenario = {
-#     ontology_id = "<dev-ScenarioOntology-physical-guid>"
-#     description = "Current sites, assets, their status, and which site each asset belongs to."
+#     ontology_id = "<dev-BooksOntology-physical-guid>"
+#     description = "Current book performance: titles, editions, campaigns, the latest week's signals and decision options, title performance and reprint requests."
 #   }
 # }
 # Ontology queries require delegated user authentication at runtime, not a saved token.

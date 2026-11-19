@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { ToolCall } from '../src/live/protocol.ts'
+import { APPROVAL_ARGUMENTS_LIMIT, type ToolCall } from '../src/live/protocol.ts'
 import { askAgent, type AgentRun } from '../server/foundry.ts'
 
 const endpoint = 'https://ai-demo-abc123.services.ai.azure.com/api/projects/demo-project'
@@ -157,4 +157,105 @@ test('a server that offers none of the allowed tools is named, next to the answe
   const outcome = await askAgent(run(fetcher(body)))
   assert.equal(outcome.status, 'answered')
   assert.deepEqual(outcome.toolCalls.at(-1), { id: 'list-fabric_iq_ontology', server: 'fabric_iq_ontology', tool: 'tools/list', state: 'failed', error: 'The server offered none of the allowed tools.' })
+})
+
+const reprint = {
+  signal_id: 'sig-20261102-title-001-inv-ed-001-hb-uk', option_id: 'sig-20261102-title-001-inv-ed-001-hb-uk-expedite', edition_id: 'ed-001-hb',
+  territory: 'UK', quantity: 20000, expedited: true, investment_gbp: 50000,
+  rationale: 'Sells at 3.1x its forecast; the recommended expedited reprint protects £84,571.', evidence: 'Signal sig-20261102-title-001-inv-ed-001-hb-uk; BKS-POL-001 §6; BKS-GOV-003 §1.',
+}
+const held = { type: 'mcp_approval_request', id: 'mcpr_68af3c2e9a7c8190b1d2e3f4', server_label: 'reprint_request', name: 'submit_reprint_request', arguments: JSON.stringify(reprint) }
+// How Foundry completes a run that holds a call for approval: no message.
+const paused = { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [held] } }
+const holding = (item: Record<string, unknown> = held) => sse({ type: 'response.output_item.done', item }, paused)
+
+test('a call held for approval ends the turn as needs-approval: its parsed arguments and the response to continue', async () => {
+  const tools: ToolCall[] = []
+  const body = sse(
+    { type: 'response.created', response: { id: 'resp_1', status: 'in_progress' } },
+    { type: 'response.output_item.added', item: { ...ontology } },
+    { type: 'response.output_item.done', item: { ...ontology, output: 'One option.' } },
+    { type: 'response.output_item.done', item: held },
+    paused,
+  )
+  const outcome = await askAgent(run(fetcher(body), { onTool: (call) => tools.push(call) }))
+  const done: ToolCall = { id: 'mcp_1', server: 'fabric_iq_ontology', tool: 'ask_ontology', state: 'completed', ms: 500, arguments: ontology.arguments }
+  assert.deepEqual(outcome, {
+    status: 'needs-approval', approval: { id: held.id, server: 'reprint_request', tool: 'submit_reprint_request', arguments: reprint }, responseId: 'resp_1', toolCalls: [done],
+  })
+  assert.equal(tools.length, 2, 'the held call is not a tool call: nothing ran')
+})
+
+test('consent comes before approval, a held call comes before a message beside it, and only one held call is ever offered', async () => {
+  const consent = { type: 'oauth_consent_request', id: 'oauthreq_1', server_label: 'reprint_request', consent_link: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x' }
+  const both = await askAgent(run(fetcher(sse({ type: 'response.output_item.done', item: consent }, { type: 'response.output_item.done', item: held }, paused))))
+  assert.deepEqual(both, { status: 'needs-consent', consentUrl: consent.consent_link, server: 'reprint_request', responseId: 'resp_1', toolCalls: [] })
+  // A preamble the model wrote before the call would leave the call waiting unseen if it were shown as the answer.
+  const preamble = await askAgent(run(fetcher(sse({ type: 'response.output_item.done', item: held }, completed('I proposed the request.')))))
+  assert.deepEqual([preamble.status, preamble.status === 'needs-approval' && preamble.approval.id], ['needs-approval', held.id])
+  const orphan = await askAgent(run(fetcher(sse({ type: 'response.output_item.done', item: held }, { type: 'response.completed', response: { status: 'completed', output: [held] } }))))
+  assert.deepEqual([orphan.status, orphan.status === 'failed' && orphan.code], ['failed', 'approval_unanswerable'])
+  // Approving one of several would leave the others waiting, so none is offered; the same request twice is one.
+  const several = await askAgent(run(fetcher(sse({ type: 'response.output_item.done', item: held }, { type: 'response.output_item.done', item: { ...held, id: 'mcpr_2' } }, paused))))
+  assert.deepEqual([several.status, several.status === 'failed' && several.code], ['failed', 'approval_several'])
+  const repeated = await askAgent(run(fetcher(sse({ type: 'response.output_item.done', item: held }, { type: 'response.output_item.done', item: held }, paused))))
+  assert.equal(repeated.status, 'needs-approval')
+})
+
+test('a held call the card could not show in full is never offered: its ID, names and arguments must be plain', async () => {
+  const many = Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`field_${index}`, index]))
+  // Arguments of exactly the limit pass; one character more is refused rather than shown cut.
+  const fill = { a: 'x'.repeat(900), b: 'x'.repeat(900), c: 'x'.repeat(900), d: 'x'.repeat(900) }
+  const exact = JSON.stringify({ ...fill, e: 'x'.repeat(APPROVAL_ARGUMENTS_LIMIT - JSON.stringify({ ...fill, e: '' }).length) })
+  assert.equal(exact.length, APPROVAL_ARGUMENTS_LIMIT)
+  assert.equal((await askAgent(run(fetcher(holding({ ...held, arguments: exact }))))).status, 'needs-approval')
+  for (const item of [
+    { ...held, id: 'mcp_1' }, { ...held, id: 'mcpr_' }, { ...held, id: `mcpr_${'a'.repeat(201)}` }, { ...held, id: 'mcpr_1/../x' },
+    { ...held, server_label: 'reprint request' }, { ...held, name: '' }, { ...held, arguments: undefined }, { ...held, arguments: reprint },
+    { ...held, arguments: '{"quantity": 20000' }, { ...held, arguments: '[20000]' }, { ...held, arguments: '"UK"' }, { ...held, arguments: '{"quantity": 1e400}' },
+    { ...held, arguments: JSON.stringify({ ...reprint, territory: ['UK', 'IE'] }) },
+    { ...held, arguments: JSON.stringify({ ...reprint, option: { id: 'x' } }) },
+    { ...held, arguments: JSON.stringify({ ...reprint, territory: 'U\u202eK' }) },
+    { ...held, arguments: JSON.stringify({ ...reprint, rationale: `Approve\u200b${'x'.repeat(30)}` }) },
+    { ...held, arguments: JSON.stringify({ ...reprint, rationale: 'x'.repeat(1001) }) },
+    { ...held, arguments: JSON.stringify({ ...reprint, 'territory code': 'UK' }) },
+    { ...held, arguments: JSON.stringify(many) },
+    { ...held, arguments: `${exact.slice(0, -2)}x"}` },
+  ]) {
+    const outcome = await askAgent(run(fetcher(holding(item))))
+    assert.deepEqual([outcome.status, outcome.status === 'failed' && outcome.code], ['failed', 'approval_unreadable'], JSON.stringify(item).slice(0, 120))
+    assert.ok(!JSON.stringify(outcome).includes('BKS-POL-001'), 'never echoes the arguments')
+  }
+})
+
+test("a decision continues the held response as the same agent and user; Foundry runs the call or skips it", async () => {
+  const captured: Captured = {}
+  const tools: ToolCall[] = []
+  const call = { id: 'mcp_7', type: 'mcp_call', server_label: 'reprint_request', name: 'submit_reprint_request', arguments: held.arguments, approval_request_id: held.id }
+  const body = sse(
+    { type: 'response.created', response: { id: 'resp_2', status: 'in_progress' } },
+    // Should Foundry list the answered request again, it is never asked twice.
+    { type: 'response.output_item.done', item: held },
+    { type: 'response.output_item.added', item: call },
+    { type: 'response.output_item.done', item: { ...call, output: '{"request_id":"rr-20261102-title-001-inv-ed-001-hb-uk"}' } },
+    completed('**Request rr-20261102-title-001-inv-ed-001-hb-uk is approved.** [A1]', 'resp_2'),
+  )
+  const outcome = await askAgent(run(fetcher(body, captured), {
+    question: undefined, approval: { id: held.id, approve: true }, previousResponseId: 'resp_1', onTool: (tool) => tools.push(tool),
+  }))
+  assert.equal(captured.url, `${endpoint}/openai/v1/responses`)
+  assert.equal((captured.init?.headers as Record<string, string>).Authorization, 'Bearer user-token')
+  assert.deepEqual(JSON.parse(String(captured.init?.body)), {
+    agent_reference: { type: 'agent_reference', name: 'demo-with-iq' },
+    input: [{ type: 'mcp_approval_response', approval_request_id: held.id, approve: true }],
+    previous_response_id: 'resp_1', metadata: { cid, variant: 'with_iq' }, stream: true,
+  })
+  assert.deepEqual([outcome.status, outcome.responseId], ['answered', 'resp_2'])
+  assert.deepEqual(tools.map((tool) => [tool.server, tool.tool, tool.state]), [['reprint_request', 'submit_reprint_request', 'running'], ['reprint_request', 'submit_reprint_request', 'completed']])
+  const rejected: Captured = {}
+  const skipped = await askAgent(run(fetcher(sse(completed('Nothing was submitted.', 'resp_3')), rejected), {
+    question: undefined, approval: { id: held.id, approve: false }, previousResponseId: 'resp_1',
+  }))
+  assert.deepEqual((JSON.parse(String(rejected.init?.body)) as { input: unknown }).input, [{ type: 'mcp_approval_response', approval_request_id: held.id, approve: false }])
+  assert.deepEqual([skipped.status, skipped.toolCalls], ['answered', []])
 })

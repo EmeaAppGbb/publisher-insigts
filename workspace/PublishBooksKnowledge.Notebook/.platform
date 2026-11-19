@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "PublishBooksKnowledge",
+    "description": "Insert-only publication of the approved, fictional book publisher documents to the current workspace's Books lakehouse Files/documents folder."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "7e20d9b3-f69a-4e6d-af75-74a459e2ccc0"
+  }
+}

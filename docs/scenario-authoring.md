@@ -2,7 +2,7 @@
 
 Derived projects change the domain and workflow, not the platform architecture.
 Use one **Fabric -> knowledge -> prompt agents -> web app** core.
-The Web IQ account, public-search probe and public-context tool are standard
+The Web IQ account, its keyless route and the public-context tool are standard
 platform components. Work IQ mail is an opt-in tool (`work_iq_enabled`); graphs,
 semantic models and other runtime integrations are explicit opt-ins.
 
@@ -24,9 +24,9 @@ for the native work-package order.
 | `workspace/` | Native Fabric item folders, seed/transform/publish/bind/readiness notebooks and deployment plans. | Credentials, saved attachments, raw backups or another project's physical bindings. |
 | `scenario/data/` | Versioned domain/table contracts, deterministic synthetic generation and small fictional fixtures. | Real tenant/customer data or evaluation answers destined for indexing. |
 | `scenario/knowledge/` | Reviewed authoritative document sources, with IDs, versions, scope and effective dates. | Raw fixture bundles, temporary exports, golden answers or mirrored mailboxes. |
-| `scenario/workflows/` | Independently testable scenario-specific rules, transformations and approved tool logic. | An undeclared backend or a second source of authoritative facts. |
-| `scenario/evals/` | Expected outcomes, source/citation requirements, negative cases and scenario checks. | Content published to a lakehouse Files corpus. |
-| `agents/<variant>/` | Each variant's `agent.json` and `instructions.md`, byte-identical across variants, and its `tools/*.json` MCP tools, whose `{{placeholders}}` the runner fills from Terraform outputs. | Rendered definitions, physical IDs, access tokens, tenant IDs, deployment receipts, headers or credentials, tools that need approval or an empty allow-list. |
+| `scenario/workflows/` | Independently testable scenario-specific rules, transformations and approved tool logic, such as the [reprint request server](../scenario/workflows/reprint-request/README.md) behind the agents' one action. | An undeclared backend or a second source of authoritative facts. |
+| `scenario/evals/` | Expected outcomes, source/citation requirements, negative cases and scenario checks, such as the books scenario's [cases](../scenario/evals/README.md), which `run_evals.py` asks the live agents. | Content published to a lakehouse Files corpus. |
+| `agents/<variant>/` | Each variant's `agent.json` and `instructions.md`, byte-identical across variants, and its `tools/*.json` MCP tools, whose `{{placeholders}}` the runner fills from Terraform outputs. | Rendered definitions, physical IDs, access tokens, tenant IDs, deployment receipts, headers or credentials, a server URL or connection name that isn't a placeholder, tools that need approval other than the one reviewed reprint request tool, or an empty allow-list. |
 | `app/` | The web app: the page in `src/`, its agent layer in `src/live/`, the token-verifying server in `server/`, its tests and `Dockerfile`. Sign-in settings come from `/api/config`. | Credentials or app-only tokens, raw browser calls to Azure/Fabric, server-built prompts, or calls to anything but the configured project and agents. |
 | `docs/`, `.github/skills/` | Canonical product explanations and repeatable procedures, respectively. | Session diaries or competing setup guides. |
 
@@ -37,13 +37,15 @@ workflow module.
 
 `app/` is a self-contained build context, with its own `Dockerfile`, dependency
 lockfile and `.dockerignore` allow-list; the runner builds the image from it only.
-The agents need no build. Do not nest a second Git repository or move their files to
-the repository root.
+`scenario/workflows/reprint-request/` is another, which the runner's `reprint` phase
+builds the same way. The agents need no build. Do not nest a second Git repository
+or move their files to the repository root.
 
 ## Fabric ontology work package
 
-A different domain gets new item identities, not a rewritten Site/Asset model
-under its old logical ID. Publish all of the following together:
+A different domain gets new item identities, not a rewritten model under an
+earlier domain's logical ID; the books domain replaced the template's Site/Asset
+sample this way. Publish all of the following together:
 
 ```text
 workspace/
@@ -70,8 +72,8 @@ workspace/
     plan.yml
 ```
 
-The [included ontology](../workspace/ScenarioOntology.Ontology) is the exact
-native TMDL example. `database.tmdl` declares compatibility; `model.tmdl`
+The [included ontology](../workspace/BooksOntology.Ontology) is the exact
+native TMDL example, and [the data contract](../scenario/data/README.md) its tables and rules. `database.tmdl` declares compatibility; `model.tmdl`
 references tables, entities and namespace. Each entity declares its backing
 table, key and typed property/column mappings. `relationships.tmdl` declares
 source-table joins and cardinalities; `entityRelationships.tmdl` maps those
@@ -108,11 +110,21 @@ Deploy each executable notebook before its action. Attach the reviewed plan
 explicitly; if the preview option is unavailable, stop for a user-approved
 native sync plus explicit notebook execution path. Never silently omit actions.
 
-The current [seeder](../workspace/SeedScenario.Notebook/notebook-content.py),
-[binder](../workspace/BindScenario.Notebook/notebook-content.py) and
+The current [seeder](../workspace/SeedBooks.Notebook/notebook-content.py),
+[signal notebook](../workspace/ComputeBookSignals.Notebook/notebook-content.py),
+[binder](../workspace/BindBooks.Notebook/notebook-content.py),
+[document publisher](../workspace/PublishBooksKnowledge.Notebook/notebook-content.py) and
 [plan](../workspace/Bootstrap.DeploymentPlan/plan.yml) demonstrate the safety
-contract. Their Site/Asset-specific identity/mapping checks are not a generic
+contract. Their books-specific identity/mapping checks are not a generic
 rewriter for another domain.
+
+The [`BookEvents`](../workspace/BookEvents.Eventhouse) Eventhouse and its
+[`BookSignals`](../workspace/BookSignals.KQLDatabase) KQL database hold what the
+reprint request server reads and writes: each signal run and the recorded requests
+([data contract](../scenario/data/README.md#booksignals-kql-database)). They are data
+items: the runner imports them once and never replaces their definitions, so their
+schema holds only additive `.create-merge table` and `.create-or-alter function`
+commands.
 
 ## Knowledge and indexing work package
 
@@ -123,7 +135,11 @@ indexes or create duplicate registrations from an authoring plugin.
 
 Store authoritative text in `scenario/knowledge/`. A native
 `Publish<Domain>Knowledge.Notebook` publishes only its reviewed bytes, verifies
-readback and rejects conflicting content rather than overwriting it. Keep
+readback and rejects conflicting content rather than overwriting it.
+[`PublishBooksKnowledge`](../workspace/PublishBooksKnowledge.Notebook/notebook-content.py)
+is the implemented example: [`embed_knowledge.py`](../.github/skills/fabric-workspace/scripts/embed_knowledge.py)
+embeds each [approved document](../scenario/knowledge/README.md) with its SHA-256,
+and a revision gets a new versioned file name. Keep
 document IDs, versions, effective periods and authority policy explicit.
 
 OneLake indexing consumes **Files**, not Delta Tables. Register the physical DEV
@@ -142,38 +158,53 @@ Distinguish these three mechanisms:
 
 ## Agent and app work package
 
-Start from the shipped read-only agents and app; [getting started](getting-started.md#7-create-the-agents-and-app)
+Start from the shipped agents, read-only except for one approval-gated reprint
+request, and app; [getting started](getting-started.md#7-create-the-agents-and-app)
 publishes them. For a scenario, change:
 
 - **The shared instructions**, [`instructions.md`](../agents/scenario-with-iq/instructions.md),
   byte for byte in every variant. They define what the assistant does, which tool
   each part of a question needs, source authority, unavailable or denied-source
-  behavior, the read-only rule and the reply format. They hold no document content
+  behavior, the read-only rule with its one approved action and its fixed refusal,
+  and the reply format. They hold no document content
   or facts, because the without-IQ variant shares them; they stay within 8,000
   characters and contain no braces. They don't invent deterministic metrics or
   authorize actions.
 - **The tool descriptions** in `agents/scenario-with-iq/tools/`, at most 1,024
   characters each, which carry what is specific to a tool: Fabric IQ asks one
   question about one entity with quoted values, Foundry IQ cites title and section
-  from the passage, Web IQ queries only public terms, and Work IQ fetches one fixed
-  path. Keep each tool's `server_label`, its connection placeholder, its read-only
-  `allowed_tools` and `require_approval: never`.
+  from the passage, Web IQ queries only public terms, Work IQ fetches one fixed
+  path, and the reprint request copies one governed option's exact values. Keep each
+  tool's `server_label`, its server URL and connection placeholders, its read-only
+  `allowed_tools`
+  and `require_approval: never`. The reprint request tool alone keeps
+  `require_approval: always` for exactly `submit_reprint_request`; never add
+  another write tool ([the one action](../agents/README.md#the-one-action)).
 - **The reply format**, if at all, together with the app's parser
   [`app/src/live/reply.ts`](../app/src/live/reply.ts), its tests and the mock answers
   in [`app/src/mock/client.ts`](../app/src/mock/client.ts)
   ([reply format](architecture.md#reply-format)).
-- **The sample questions** in [`app/src/samples.ts`](../app/src/samples.ts), and the
-  runner's readiness questions and expected facts in its `SCENARIO` descriptor
-  when the seed data changes.
+- **The sample questions** in [`app/src/samples.ts`](../app/src/samples.ts), a case
+  for each in [`scenario/evals/`](../scenario/evals/README.md), and the runner's
+  readiness questions and expected facts in its `SCENARIO` descriptor when the seed
+  data changes.
 
 A definition may use only the runner's placeholders: `agent_display_name`,
 `agent_model_deployment`, `agent_reasoning_effort`, `knowledge_base_mcp_endpoint`,
 `knowledge_base_connection`, `public_context_mcp_endpoint`,
 `public_context_connection`, `fabric_iq_mcp_endpoint`, `fabric_iq_connection`,
-`work_iq_mail_mcp_endpoint` and `work_iq_mail_connection`. `foundry_agent.py validate`
-refuses any other, an inlined instruction or tool, a tool with other keys or
-headers, an approval step, an empty allow-list and shared files that differ between
-variants. A new tool needs its own reviewed project connection and identity decision
+`work_iq_mail_mcp_endpoint`, `work_iq_mail_connection`,
+`reprint_request_mcp_endpoint` and `reprint_request_connection`. A tool's
+`server_url` and `project_connection_id` are each exactly one of them, never a
+deployment's URL or connection name. `foundry_agent.py validate`
+refuses any other placeholder, an inlined instruction or tool, a tool with other
+keys or headers, an empty allow-list and shared files that differ between variants.
+It ties the one approval step to the reprint request server: only
+`tools/ReprintRequest.json` may name its `reprint_request` label,
+`{{reprint_request_mcp_endpoint}}` or `{{reprint_request_connection}}`, and only with
+`allowed_tools: ["submit_reprint_request"]` and `require_approval: "always"`; any
+other tool that names any of them is refused, whatever it asks for, and every other
+tool needs `require_approval: "never"`. A new tool needs its own reviewed project connection and identity decision
 in Terraform, a placeholder, and an IQ for its server label in the app
 (`SERVER_IQ` in [`app/src/live/protocol.ts`](../app/src/live/protocol.ts)), never a
 shared key.
@@ -189,20 +220,22 @@ Responses API for the variant's agent. Keep conversations isolated per user: the
 holds only the latest response ID, and Foundry owns the conversation history and who
 may continue it.
 
-Build scenario views on the shell's sign-in, variant switch, tool timeline and
-failure states. Missing sign-in, missing agent access (HTTP 403), a pending tool
-consent link, the 225-second turn limit and source errors are explicit
-blocked/incomplete states. Do not return synthetic success or indexed snapshot
-facts as live data. Releases follow the runner's `agent-publish` and `app-build`
-approvals and the reviewed app plan; granting other users access is a separate
-operator step.
+Build scenario views on the shell's sign-in, variant switch, tool timeline, approval
+card and failure states. Missing sign-in, missing agent access (HTTP 403), a pending
+tool consent link, a call waiting for the user's approval, the 225-second turn limit
+and source errors are explicit blocked/incomplete states. Do not return synthetic
+success or indexed snapshot facts as live data. Releases follow the runner's
+`reprint-roles`, `reprint-build`, `agent-publish` and `app-build` approvals and the
+reviewed reprint and app plans; granting other users access and approval roles is a
+separate operator step.
 
 ## Additional runtime integrations
 
 | Capability | Required addition and exit evidence |
 | --- | --- |
 | Work IQ | Shipped as the opt-in mail tool (`work_iq_enabled`): one read-only `fetch` of the user's own mail through OAuth identity passthrough, with the [prerequisites in getting started](getting-started.md#work-iq). Extend it only within read-only, user-delegated access and cited accessible work context. No mailbox clone or fixture masquerading as real work data. |
-| Web IQ | Standard: the Terraform account, the runner's probe and the agents' public-context tool ([preparation](../preparation.md#web-iq)). Portal AppID linking is a manual gate; require public-only queries, citations and scenario freshness/conflict checks. |
+| Approval-gated action | Shipped as the reprint request, the only tool that changes anything: `require_approval: always` for one allowed tool, its own server in `scenario/workflows/` through OAuth identity passthrough, approval roles checked against the scenario's decision authority, arguments checked against governed rows, and a write as the server's own identity with the narrowest data roles ([reprint request](runtime-integration.md#reprint-request)). Prove it with a proposal and a rejection, never an approval. Another action needs its own explicit design decision; never widen this one. |
+| Web IQ | Standard: the Terraform account, its keyless `web-iq` connection, the runner's wiring check and the agents' public-context tool ([preparation](../preparation.md#web-iq)). Portal AppID linking and binding the project identity are manual gates; require public-only queries, citations and scenario freshness/conflict checks. |
 | Fabric graph | An approved native ontology projection/model, target-local bindings, materialization/refresh and bounded path-result checks. No second hand-authored relationship vocabulary. |
 | Semantic model | Native `.platform`, `definition.pbism` and exported TMDL definition parts, explicit binding/refresh action and exact governed calculation checks. |
 | Fabric data agent | Native definition/published endpoint, allowed sources, reader authorization and actual query receipts. Not a replacement for deterministic scenario rules. |

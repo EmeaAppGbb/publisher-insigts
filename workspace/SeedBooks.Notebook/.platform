@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "SeedBooks",
+    "description": "Insert-only fictional titles, editions, weekly sales, stock, public signals and campaigns, and starter knowledge, in the current workspace's Books lakehouse."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "c8334dd2-4437-4c1f-9e3f-b402a9011d0c"
+  }
+}

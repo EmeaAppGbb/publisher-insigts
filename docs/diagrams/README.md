@@ -23,7 +23,7 @@ beside each image.
 
 ### Knowledge retrieval
 
-[![Indexed OneLake document folders feed the agents' knowledge base; the optional live ontology source sits in a check-only knowledge base that only the runner's verify queries, and Web IQ feeds its own public-context knowledge base, with distinct indexing and end-user authorization.](knowledge-retrieval.svg)](knowledge-retrieval.svg)
+[![Indexed OneLake document folders feed the agents' knowledge base; the optional live ontology source sits in a check-only knowledge base that only the runner's verify queries, with distinct indexing and end-user authorization.](knowledge-retrieval.svg)](knowledge-retrieval.svg)
 
 ### Fabric lifecycle
 

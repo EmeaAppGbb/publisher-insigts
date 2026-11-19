@@ -37,8 +37,9 @@ Report security issues as described in [SECURITY.md](SECURITY.md), never in a pu
   chosen target.
 - **Portable identities.** Keep `.platform` logical IDs, TMDL lineage tags and binding markers
   stable; they are not deployment IDs.
-- **Locked dependencies.** Keep `app/package-lock.json` in step with `app/package.json`, on
-  public npm registry URLs ([npm lockfile](#npm-lockfile)); never hand-edit its hashes.
+- **Locked dependencies.** Keep each `package-lock.json` (`app/` and the reprint request server in
+  `scenario/workflows/reprint-request/`) in step with its `package.json`, on public npm registry URLs
+  ([npm lockfile](#npm-lockfile)); never hand-edit its hashes.
 - **Fictional sample.** Keep sample sites, assets, documents and mail fictional; never add a
   real customer, company or person name.
 - **Pins.** Do not upgrade providers, tools or dependencies in an unrelated change.
@@ -82,12 +83,17 @@ python3 -B -m unittest discover -s .github/skills/fabric-workspace/tests
 
 # App image, from the repository root, where Docker is available
 docker build --tag app:check app
+
+# Reprint request server, in scenario/workflows/reprint-request/
+(cd scenario/workflows/reprint-request && npm ci && npm run lint && npm run typecheck && npm test)
+docker build --tag reprint-request:check scenario/workflows/reprint-request
 ```
 
 CI also parses every tracked Python file without running it, checks shell syntax, and starts
 the app image with placeholder settings to check its health endpoint, its refusal of an
 unauthenticated question and of a missing configuration, and the redirect bridge's framing
-header.
+header. It starts the reprint request server's image the same way, to check its health endpoint
+and its refusal of an MCP request without a token and of a missing configuration.
 
 If `infra/` holds local deployment files, validate an isolated copy as described in the
 [template-maintenance skill](.github/skills/template-maintenance/SKILL.md#run-static-checks-only),
@@ -96,9 +102,10 @@ ask it to statically validate the template.
 
 ### npm lockfile
 
-`app/package-lock.json` must resolve every package from `https://registry.npmjs.org/`; CI rejects
-other hosts. If your npm configuration uses an Azure Artifacts mirror, normalize the lockfile
-from `app/` after changing dependencies. Integrity hashes are unchanged, and npm still routes
+`app/package-lock.json` and `scenario/workflows/reprint-request/package-lock.json` must resolve
+every package from `https://registry.npmjs.org/`; CI rejects other hosts. If your npm
+configuration uses an Azure Artifacts mirror, normalize the lockfile from its folder after
+changing dependencies. Integrity hashes are unchanged, and npm still routes
 these URLs through your configured registry.
 
 ```sh

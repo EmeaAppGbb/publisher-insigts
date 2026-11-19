@@ -26,12 +26,18 @@ LAKEHOUSE = "22222222-2222-4222-8222-222222222222"
 ONTOLOGY = "33333333-3333-4333-8333-333333333333"
 SEED = "44444444-4444-4444-8444-444444444444"
 BIND = "55555555-5555-4555-8555-555555555555"
+SIGNALS = "15151515-1515-4515-8515-151515151515"
 CONNECTION = "66666666-6666-4666-8666-666666666666"
 OPERATION = "77777777-7777-4777-8777-777777777777"
 SEED_JOB = "88888888-8888-4888-8888-888888888888"
 BIND_JOB = "99999999-9999-4999-8999-999999999999"
+SIGNALS_JOB = "16161616-1616-4616-8616-161616161616"
+KNOWLEDGE = "17171717-1717-4717-8717-171717171717"
+KNOWLEDGE_JOB = "18181818-1818-4818-8818-181818181818"
 SQL_ENDPOINT = ("example-endpoint.datawarehouse.fabric.microsoft.com", "14141414-1414-4414-8414-141414141414")
 RERUN_JOB = "13131313-1313-4313-8313-131313131313"
+EVENTHOUSE = "19191919-1919-4919-8919-191919191919"
+KQL = "20202020-2020-4020-8020-202020202020"
 TENANT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 COMMIT = "c" * 40
 # The deployed scenario's names and identities, so these tests follow the SCENARIO descriptor.
@@ -51,6 +57,11 @@ REQUEST = {
 
 def reply(status=200, body=None, headers=None):
     return deploy.Response(status, headers or {}, b"" if body is None else json.dumps(body).encode())
+
+
+def onelake_document(name):
+    """The doc_url Search returns for a file in the DEV lakehouse's documents folder."""
+    return f"https://onelake.blob.fabric.microsoft.com/{WORKSPACE}/{LAKEHOUSE}/Files/documents/{name}"
 
 
 class FakeShell:
@@ -203,10 +214,14 @@ def incoming(root):
 ITEMS = {"value": [
     {"id": LAKEHOUSE, "type": "Lakehouse", "displayName": NAMES["lakehouse"], "workspaceId": WORKSPACE},
     {"id": SEED, "type": "Notebook", "displayName": NAMES["seed"], "workspaceId": WORKSPACE},
+    {"id": SIGNALS, "type": "Notebook", "displayName": NAMES["signals"], "workspaceId": WORKSPACE},
     {"id": ONTOLOGY, "type": "Ontology", "displayName": NAMES["ontology"], "workspaceId": WORKSPACE},
     {"id": BIND, "type": "Notebook", "displayName": NAMES["bind"], "workspaceId": WORKSPACE},
+    {"id": KNOWLEDGE, "type": "Notebook", "displayName": NAMES["knowledge"], "workspaceId": WORKSPACE},
+    {"id": EVENTHOUSE, "type": "Eventhouse", "displayName": NAMES["eventhouse"], "workspaceId": WORKSPACE},
+    {"id": KQL, "type": "KQLDatabase", "displayName": NAMES["kql"], "workspaceId": WORKSPACE},
 ]}
-RUNS = ((SEED, SEED_JOB), (BIND, BIND_JOB))
+RUNS = ((SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), (BIND, BIND_JOB), (KNOWLEDGE, KNOWLEDGE_JOB))
 
 
 def bootstrap_http(root, connection_states=("ConnectedAndInitialized",), status=None, definitions=(True,)):
@@ -228,6 +243,9 @@ def bootstrap_http(root, connection_states=("ConnectedAndInitialized",), status=
     http.add("GET", rf"/lakehouses/{LAKEHOUSE}$", reply(body={"properties": {"defaultSchema": "dbo", "sqlEndpointProperties": {
         "connectionString": SQL_ENDPOINT[0], "id": SQL_ENDPOINT[1], "provisioningStatus": "Success"}}}))
     http.add("POST", r"/getDefinition$", *[reply(body=tmdl(bound)) for bound in definitions])
+    # The plan's post-action already published the documents; tests that need another answer insert their own.
+    http.add("GET", rf"/items/{KNOWLEDGE}/jobs/instances$",
+             reply(body={"value": [{"id": KNOWLEDGE_JOB, "status": "Completed"}]}))
     return http
 
 
@@ -314,50 +332,12 @@ class PlanTests(unittest.TestCase):
         for call in native.call_args_list:
             self.assertNotIn("TF_VAR_github_token", call.kwargs["env"])
 
-    def test_after_knowledge_setup_plans_and_applies_carry_the_web_iq_key_and_teardown_does_not(self):
-        root = make_root(self)
-        shell = FakeShell(plan_rules([("restful_resource.public_context_source[0]", ["create"])]))
-        ctx = make_context(self, root, shell, yes=True)
+    def test_knowledge_plans_and_applies_need_no_web_iq_key(self):
+        shell = FakeShell(plan_rules([("azapi_resource.web_iq_connection[0]", ["create"])]))
+        ctx = make_context(self, make_root(self), shell, yes=True)
         ctx.cache["variables"]["knowledge_lakehouse_id"] = LAKEHOUSE
         ctx.environ = {}
-        with self.assertRaisesRegex(deploy.Waiting, "Web IQ key"):
-            deploy.converge(ctx, "knowledge")
-        self.assertFalse(shell.calls)
-        ctx.environ = {"TF_VAR_web_iq_api_key": "ambient"}
-        with self.assertRaisesRegex(deploy.Blocked, "Unset TF_VAR_web_iq_api_key"):
-            deploy.converge(ctx, "knowledge")
-        ctx.environ = {"WEB_IQ_API_KEY": "key with space"}
-        with self.assertRaisesRegex(deploy.Blocked, "invalid HTTP header characters"):
-            deploy.converge(ctx, "knowledge")
-        ctx.environ = {"WEB_IQ_API_KEY": " web-iq-key "}
-        with mock.patch.object(shell, "run", wraps=shell.run) as native:
-            self.assertEqual(deploy.converge(ctx, "knowledge"), "applied")
-            keyed = {call.args[0][2]: call.kwargs["env"].get("TF_VAR_web_iq_api_key") for call in native.call_args_list
-                     if call.args[0][2] in ("plan", "apply")}
-            self.assertTrue(all("WEB_IQ_API_KEY" not in call.kwargs["env"] for call in native.call_args_list))
-        self.assertEqual(keyed, {"plan": "web-iq-key", "apply": "web-iq-key"})
-        self.assertNotIn("web-iq-key", ctx.state.path.read_text(encoding="utf-8"))
-
-    def test_teardown_and_earlier_plans_never_carry_the_web_iq_key(self):
-        # An ephemeral variable set at plan must be set at apply, so it can't depend on whether the shell has the key.
-        for phase, lakehouse, changes in (("destroy", LAKEHOUSE, [("fabric_workspace.dev", ["delete"])]),
-                                          ("platform", None, [("azurerm_resource_group.main", ["create"])])):
-            with self.subTest(phase=phase):
-                shell = FakeShell(plan_rules(changes))
-                ctx = make_context(self, make_root(self), shell, allow_delete=True)
-                ctx.args.approve = {}
-                ctx.cache["variables"]["knowledge_lakehouse_id"] = lakehouse
-                ctx.environ = {"WEB_IQ_API_KEY": "key with space"}
-                with mock.patch.object(shell, "run", wraps=shell.run) as native:
-                    with self.assertRaises(deploy.NeedsApproval) as approval:
-                        deploy.converge(ctx, phase)
-                    ctx.args.approve = {phase: approval.exception.approval["sha256"][:12]}
-                    ctx.environ = {}
-                    self.assertEqual(deploy.converge(ctx, phase), "applied")
-                for call in native.call_args_list:
-                    self.assertNotIn("TF_VAR_web_iq_api_key", call.kwargs["env"])
-                    self.assertNotIn("WEB_IQ_API_KEY", call.kwargs["env"])
-                self.assertEqual(len(shell.matching(terraform("apply"))), 1)
+        self.assertEqual(deploy.converge(ctx, "knowledge"), "applied")
 
     def test_opted_in_git_requires_a_pat_before_planning(self):
         root = make_root(self)
@@ -521,7 +501,7 @@ class TeardownTests(unittest.TestCase):
     def test_snapshot_preserves_only_cleanup_identifiers_and_survives_partial_destroy(self):
         ctx = self.context()
         foundry = f"/subscriptions/{self.SUBSCRIPTION}/resourceGroups/rg-demo/providers/Microsoft.CognitiveServices/accounts/ai-demo"
-        agents = {key: {"name": f"demo-{key.replace('_', '-')}", "display_name": "Scenario assistant",
+        agents = {key: {"name": f"demo-{key.replace('_', '-')}", "display_name": "Book performance assistant",
                         "source": source} for key, source in deploy.foundry.VARIANTS.items()}
         state = {"values": {"root_module": {"resources": [
             {"address": "azapi_resource.foundry", "mode": "managed",
@@ -778,7 +758,7 @@ class BootstrapTests(unittest.TestCase):
             "errorCode": "FeatureNotAvailable", "message": "Specifying a deploymentPlan is not supported."})]))
         http.add("POST", r"/git/updateFromGit$", reply(202, headers={"x-ms-operation-id": OPERATION}))
         for item, job in RUNS:
-            http.add("GET", rf"/items/{item}/jobs/instances$", reply(body={"value": []}))
+            http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"), [reply(body={"value": []})]))
             http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
                 "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
             http.add("GET", rf"/items/{item}/jobs/instances/{job}$",
@@ -788,7 +768,7 @@ class BootstrapTests(unittest.TestCase):
         (_, body), = http.posts(r"/git/updateFromGit$")
         self.assertNotIn("deploymentPlan", body["options"])
         runs = http.posts(r"/jobs/execute/instances")
-        self.assertEqual([item in url for (url, _), (item, _) in zip(runs, RUNS)], [True, True])
+        self.assertEqual([item in url for (url, _), (item, _) in zip(runs, RUNS)], [True] * len(RUNS))
         self.assertEqual([body["executionData"]["parameters"] for _, body in runs],
                          [deploy.notebook_parameters(step.parameters) for step in deploy.SCENARIO.runs])
         self.assertEqual(runs[0][1]["executionData"]["parameters"]["allow_other_workspaces"], {"value": False, "type": "bool"})
@@ -936,46 +916,59 @@ class BootstrapTests(unittest.TestCase):
 class ScenarioContractTests(unittest.TestCase):
     """The names other owners rely on: the workspace items, the knowledge registration and the agents."""
 
-    def test_the_scenario_is_the_template_sample(self):
-        self.assertEqual(deploy.SCENARIO.items, (("lakehouse", "Lakehouse", "Scenario"), ("seed", "Notebook", "SeedScenario"),
-                                                 ("ontology", "Ontology", "ScenarioOntology"),
-                                                 ("bind", "Notebook", "BindScenario")))
+    def test_the_scenario_is_the_books_portfolio(self):
+        self.assertEqual(deploy.SCENARIO.items, (("lakehouse", "Lakehouse", "Books"), ("seed", "Notebook", "SeedBooks"),
+                                                 ("signals", "Notebook", "ComputeBookSignals"),
+                                                 ("ontology", "Ontology", "BooksOntology"),
+                                                 ("bind", "Notebook", "BindBooks"),
+                                                 ("knowledge", "Notebook", "PublishBooksKnowledge"),
+                                                 ("eventhouse", "Eventhouse", "BookEvents"),
+                                                 ("kql", "KQLDatabase", "BookSignals")))
         self.assertEqual((deploy.SCENARIO.plan, deploy.SCENARIO.registration, deploy.SCENARIO.expression),
-                         ("Bootstrap", "scenario", "ScenarioLakehouse"))
-        self.assertEqual(deploy.SCENARIO.tables, ("demo_sites", "demo_assets"))
+                         ("Bootstrap", "scenario", "BooksLakehouse"))
+        self.assertEqual(deploy.SCENARIO.tables, ("titles", "editions", "campaigns", "title_signals", "decision_options",
+                                                  "title_performance", "reprint_requests"))
         self.assertEqual([(step.item, step.parameters, step.skip_completed) for step in deploy.SCENARIO.runs], [
-            ("seed", {"lakehouse_name": "Scenario", "allow_other_workspaces": False}, True),
-            ("bind", {"lakehouse_name": "Scenario", "ontology_name": "ScenarioOntology"}, False)])
-        self.assertEqual(deploy.run_order(), "SeedScenario and BindScenario")
-        self.assertEqual(deploy.SCENARIO.expected_facts, ("Pump B", "North Works"))
-        # The default knowledge_folders key, which SeedScenario's Files/documents folder fills.
+            ("seed", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True),
+            ("signals", {"lakehouse_name": "Books", "kql_database_name": "BookSignals"}, True),
+            ("bind", {"lakehouse_name": "Books", "ontology_name": "BooksOntology"}, False),
+            ("knowledge", {"lakehouse_name": "Books", "allow_other_workspaces": False}, True)])
+        self.assertEqual([step.reads for step in deploy.SCENARIO.runs], [(), ("seed",), (), ()])
+        # The documents do not depend on the binding: the publisher runs once even when the binding is verified.
+        self.assertEqual([step.binding_chain for step in deploy.SCENARIO.runs], [True, True, True, False])
+        self.assertEqual(deploy.run_order(), "SeedBooks, ComputeBookSignals, BindBooks and PublishBooksKnowledge")
+        self.assertEqual(deploy.SCENARIO.expected_facts, ("The Glass Orchard", "Forecast variance"))
+        # The default knowledge_folders key, whose Files/documents folder SeedBooks and PublishBooksKnowledge fill.
         self.assertEqual(deploy.SCENARIO.document_source, "documents")
+        self.assertEqual(deploy.SCENARIO.document_file, "bks-pol-001-reprint-and-stock-policy-v1.md")
 
     def test_the_scenario_descriptor_is_self_consistent(self):
         lakehouse, ontology = deploy.scenario_name("lakehouse"), deploy.scenario_name("ontology")
         notebooks = {key for key, kind, _ in deploy.SCENARIO.items if kind == "Notebook"}
-        for step in deploy.SCENARIO.runs:
+        for index, step in enumerate(deploy.SCENARIO.runs):
             self.assertIn(step.item, notebooks)
+            # A notebook reads only earlier notebooks' output.
+            self.assertLessEqual(set(step.reads), {earlier.item for earlier in deploy.SCENARIO.runs[:index]})
             self.assertEqual(step.parameters["lakehouse_name"], lakehouse)
             self.assertEqual(step.parameters.get("ontology_name", ontology), ontology)
-        # One single-entity question, with the Status value quoted, about rows only the live ontology holds.
-        self.assertTrue(deploy.SCENARIO.ontology_question.startswith(f"Using the live {ontology}, which Asset rows"))
-        self.assertIn('Status value "Maintenance"', deploy.SCENARIO.ontology_question)
+            self.assertEqual(step.parameters.get("kql_database_name", deploy.scenario_name("kql")),
+                             deploy.scenario_name("kql"))
+        # One single-entity question, with the IsMaterial value quoted, about rows only the live ontology holds.
+        self.assertTrue(deploy.SCENARIO.ontology_question.startswith(f"Using the live {ontology}, which TitleSignal rows"))
+        self.assertIn('IsMaterial value "Yes"', deploy.SCENARIO.ontology_question)
         self.assertEqual(deploy.knowledge.registration_name(deploy.SCENARIO.registration), deploy.SCENARIO.registration)
         self.assertEqual(deploy.knowledge.description_text(deploy.SCENARIO.registration_description),
                          deploy.SCENARIO.registration_description)
-        self.assertIn("indexed starter document", deploy.SCENARIO.document_question)
-        # The billable public-context question names no site, asset or other private detail.
-        question = deploy.SCENARIO.public_context_question
-        self.assertIn("pump", question.lower())
-        for private in (*deploy.SCENARIO.expected_facts, "Pump A", "demo-", lakehouse, ontology):
-            self.assertNotIn(private, question)
+        # The document question names the approved document whose passage must answer it.
+        title = (REPO / "scenario" / "knowledge" / deploy.SCENARIO.document_file).read_text(encoding="utf-8")
+        self.assertIn(title.splitlines()[0].removeprefix("# ").casefold(), deploy.SCENARIO.document_question.casefold())
         for fact in deploy.SCENARIO.expected_facts:
             self.assertIn(fact, deploy.SCENARIO.app_question)
         self.assertIn(deploy.SCENARIO.app_question, deploy.APP_NEXT)
         args = deploy.parse_arguments(["up"])
-        self.assertEqual((args.ontology_question, args.document_question),
-                         (deploy.SCENARIO.ontology_question, deploy.SCENARIO.document_question))
+        self.assertEqual((args.ontology_question, args.document_question, args.document_file),
+                         (deploy.SCENARIO.ontology_question, deploy.SCENARIO.document_question,
+                          deploy.SCENARIO.document_file))
 
     def test_the_agents_follow_the_contract(self):
         self.assertEqual(deploy.foundry.VARIANTS, {"with_iq": "agents/scenario-with-iq",
@@ -1134,7 +1127,8 @@ class NativeBootstrapTests(unittest.TestCase):
         ctx.args.bootstrap_fallback = "notebooks"
         ctx.http.add("POST", r"/items/bulkImportDefinitions$", reply(body=self.result))
         for item, job in RUNS:
-            ctx.http.add("GET", rf"/items/{item}/jobs/instances$", reply(body={"value": []}))
+            ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"),
+                                       [reply(body={"value": []})]))
             ctx.http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$",
                          reply(202, headers={"Location":
                              f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
@@ -1143,7 +1137,7 @@ class NativeBootstrapTests(unittest.TestCase):
         (_, body), = ctx.http.posts(r"/items/bulkImportDefinitions$")
         self.assertNotIn("deploymentPlan", body["options"])
         runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
-        self.assertEqual([item in url for url, (item, _) in zip(runs, RUNS)], [True, True])
+        self.assertEqual([item in url for url, (item, _) in zip(runs, RUNS)], [True] * len(RUNS))
 
 
     def accept_updates(self, ctx, response=None):
@@ -1152,8 +1146,8 @@ class NativeBootstrapTests(unittest.TestCase):
 
     def jobs(self, ctx, *runs, completed=()):
         for item, job in runs:
-            ctx.http.add("GET", rf"/items/{item}/jobs/instances$",
-                         reply(body={"value": [{"id": job, "status": "Completed"}] if item in completed else []}))
+            ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{item}/jobs/instances$"), [
+                reply(body={"value": [{"id": job, "status": "Completed"}] if item in completed else []})]))
             ctx.http.add("POST", rf"/notebooks/{item}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
                 "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{item}/jobs/instances/{job}"}))
             ctx.http.add("GET", rf"/items/{item}/jobs/instances/{job}$", reply(body={"status": "Completed"}))
@@ -1189,7 +1183,7 @@ class NativeBootstrapTests(unittest.TestCase):
             deploy.phase_bootstrap(ctx)
         self.assertFalse(ctx.http.posts(r"/updateDefinition"))
         self.accept_updates(ctx)
-        self.jobs(ctx, (SEED, SEED_JOB))
+        self.jobs(ctx, (SEED, SEED_JOB), (SIGNALS, SIGNALS_JOB), completed=(SIGNALS,))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         self.assertIn(f"updated {NAMES['seed']}", deploy.phase_bootstrap(ctx))
         (url, body), = ctx.http.posts(r"/updateDefinition")
@@ -1197,13 +1191,15 @@ class NativeBootstrapTests(unittest.TestCase):
         parts = {part["path"]: base64.b64decode(part["payload"]) for part in body["definition"]["parts"]}
         self.assertEqual(parts, {"notebook-content.py": notebook.read_bytes(),
                                  ".platform": (notebook.parent / ".platform").read_bytes()})
-        (run, run_body), = ctx.http.posts(r"/jobs/execute/instances")
+        # The signals read the seed's tables, so they are computed again even after an earlier completed run.
+        (run, run_body), (signals, _) = ctx.http.posts(r"/jobs/execute/instances")
         self.assertIn(SEED, run)
+        self.assertIn(SIGNALS, signals)
         self.assertEqual(run_body["executionData"]["parameters"]["allow_other_workspaces"], {"value": False, "type": "bool"})
         native = ctx.state.section("bootstrap")["native"]
         self.assertEqual((native["updates"][NAMES["seed"]]["status"], native["rerun"]), ("Succeeded", []))
         deploy.phase_bootstrap(ctx)
-        self.assertEqual((len(ctx.http.posts(r"/updateDefinition")), len(ctx.http.posts(r"/jobs/execute/instances"))), (1, 1))
+        self.assertEqual((len(ctx.http.posts(r"/updateDefinition")), len(ctx.http.posts(r"/jobs/execute/instances"))), (1, 2))
 
     def test_an_updated_notebook_runs_again_even_after_an_unobserved_earlier_run(self):
         ctx = self.context()
@@ -1214,14 +1210,40 @@ class NativeBootstrapTests(unittest.TestCase):
         parameters = next(step.parameters for step in deploy.SCENARIO.runs if step.item == "seed")
         ctx.state.section("bootstrap")["jobs"] = {NAMES["seed"]: {"id": SEED_JOB, "status": "Submitted", "parameters": parameters}}
         self.accept_updates(ctx)
-        self.jobs(ctx, (SEED, RERUN_JOB))
+        self.jobs(ctx, (SEED, RERUN_JOB), (SIGNALS, SIGNALS_JOB))
         ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{SEED}/jobs/instances$"),
                                    [reply(body={"value": [{"id": SEED_JOB, "status": "Completed"}]})]))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         deploy.phase_bootstrap(ctx)
-        (run, _), = ctx.http.posts(r"/jobs/execute/instances")
+        (run, _), (signals, _) = ctx.http.posts(r"/jobs/execute/instances")
         self.assertIn(SEED, run)
+        self.assertIn(SIGNALS, signals)
         self.assertEqual(ctx.state.section("bootstrap")["jobs"][NAMES["seed"]]["id"], RERUN_JOB)
+
+    def test_the_document_publisher_runs_once_with_a_verified_binding_and_again_after_an_update(self):
+        ctx = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(rf"/items/{KNOWLEDGE}/jobs/instances$"), [
+            reply(body={"value": []}), reply(body={"value": [{"id": KNOWLEDGE_JOB, "status": "Completed"}]})]))
+        ctx.http.add("POST", rf"/notebooks/{KNOWLEDGE}/jobs/execute/instances\?jobType=RunNotebook$", reply(202, headers={
+            "Location": f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE}/items/{KNOWLEDGE}/jobs/instances/{KNOWLEDGE_JOB}"}))
+        ctx.http.add("GET", rf"/items/{KNOWLEDGE}/jobs/instances/{KNOWLEDGE_JOB}$", reply(body={"status": "Completed"}))
+        # The plan did not run it: DEV has no completed run, and the verified binding runs no other notebook.
+        deploy.phase_bootstrap(ctx)
+        (url, body), = ctx.http.posts(r"/jobs/execute/instances")
+        self.assertIn(KNOWLEDGE, url)
+        parameters = next(step.parameters for step in deploy.SCENARIO.runs if step.item == "knowledge")
+        self.assertEqual(body["executionData"]["parameters"], deploy.notebook_parameters(parameters))
+        deploy.phase_bootstrap(ctx)
+        self.assertEqual(len(ctx.http.posts(r"/jobs/execute/instances")), 1, "a completed run is not repeated")
+        # A revised publisher runs again after its approved update, although DEV has a completed run.
+        self.change(ctx, f"{FOLDERS['knowledge']}/notebook-content.py")
+        approval = self.approval(ctx)
+        self.accept_updates(ctx)
+        ctx.args.approve = {"item-update": approval["sha256"][:12]}
+        self.assertIn(f"updated {NAMES['knowledge']}", deploy.phase_bootstrap(ctx))
+        runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
+        self.assertEqual((len(runs), KNOWLEDGE in runs[-1]), (2, True))
+        self.assertEqual(ctx.state.section("bootstrap")["native"]["rerun"], [])
 
     def test_lakehouse_definitions_are_never_replaced(self):
         ctx = self.context()
@@ -1242,7 +1264,7 @@ class NativeBootstrapTests(unittest.TestCase):
         approval = self.approval(ctx)
         self.assertEqual(approval["summary"]["changes"], [{"action": "update", "address": f"Ontology {NAMES['ontology']}"}])
         self.accept_updates(ctx)
-        self.jobs(ctx, *RUNS, completed=(SEED,))
+        self.jobs(ctx, *RUNS, completed=(SEED, SIGNALS, KNOWLEDGE))
         ctx.args.approve = {"item-update": approval["sha256"][:12]}
         self.assertIn(f"updated {NAMES['ontology']}", deploy.phase_bootstrap(ctx))
         (url, body), = ctx.http.posts(r"/updateDefinition")
@@ -1251,7 +1273,7 @@ class NativeBootstrapTests(unittest.TestCase):
         self.assertTrue({".platform", "model.tmdl"} <= paths and any(path.startswith("entities/") for path in paths))
         self.assertFalse(any(path.startswith("/") for path in paths))
         runs = [url for url, _ in ctx.http.posts(r"/jobs/execute/instances")]
-        self.assertEqual(len(runs), 1, "the seed completed already; only the binder reruns")
+        self.assertEqual(len(runs), 1, "the seed and signals completed already; only the binder reruns")
         self.assertIn(BIND, runs[0])
 
     def test_an_update_accepted_without_a_receipt_is_resubmitted_only_after_review(self):
@@ -1401,21 +1423,27 @@ class ReadinessTests(unittest.TestCase):
         wrong["references"][0]["ontologyId"] = LAKEHOUSE
         self.assertIn("no fabricOntology reference for the DEV workspace and ontology",
                       deploy.ontology_evidence(wrong, source, deploy.SCENARIO.expected_facts)[0])
-        snapshot = {"activity": [{"type": "indexedOneLake"}], "references": [{"type": "indexedOneLake"}]}
+        snapshot = {"activity": [{"type": "indexedOneLake"}], "references": [{"type": "indexedOneLake", "sourceData": {
+            "doc_url": onelake_document(deploy.SCENARIO.document_file)}}]}
         self.assertIn(f"no fabricOntology activity for {name}",
                       deploy.ontology_evidence(snapshot, source, deploy.SCENARIO.expected_facts)[0])
-        self.assertEqual(deploy.document_evidence(snapshot, "demo-documents")[0], [])
+        self.assertEqual(deploy.document_evidence(snapshot, "demo-documents", deploy.SCENARIO.document_file)[0], [])
 
-    def test_public_context_evidence_needs_a_cited_web_iq_call(self):
-        cited = {"activity": [{"type": "mcpServer", "knowledgeSourceName": "demo-web",
-                               "mcpServerArguments": {"toolName": "web"}}],
-                 "references": [{"type": "mcpServer", "toolName": "web", "sourceData": {"title": "Pump care"}}]}
-        self.assertEqual(deploy.public_context_evidence(cited, "demo-web"), ([], {"activity": 1, "references": 1}))
-        failed = {"activity": [{"type": "mcpServer", "knowledgeSourceName": "demo-web", "error": "401"}], "references": []}
-        self.assertEqual(deploy.public_context_evidence(failed, "demo-web")[0],
-                         ["the Web IQ tool call reported an error", "no cited Web IQ reference"])
-        self.assertIn("no mcpServer activity for demo-web",
-                      deploy.public_context_evidence({"activity": [{"type": "indexedOneLake"}]}, "demo-web")[0])
+    def test_document_evidence_requires_a_passage_of_the_approved_document(self):
+        document = deploy.SCENARIO.document_file
+
+        def retrieved(*files):
+            return {"activity": [{"type": "indexedOneLake", "knowledgeSourceName": "docs"}],
+                    "references": [{"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document(name)}}
+                                   for name in files]}
+
+        self.assertEqual(deploy.document_evidence(retrieved("starter.txt", document), "docs", document),
+                         ([], {"activity": 1, "references": 2, "document": document}))
+        # Another file in the folder, such as the seeder's starter document, does not prove the approved one.
+        for files in (("starter.txt",), (f"draft-{document}",)):
+            with self.subTest(files=files):
+                self.assertEqual(deploy.document_evidence(retrieved(*files), "docs", document)[0],
+                                 [f"no indexedOneLake reference to {document}"])
 
     def test_verify_waits_for_every_folder_source_and_asks_each_question_of_its_own_base(self):
         sources = {"documents": "demo-documents", "manuals": "demo-manuals", "unattached": "demo-unattached"}
@@ -1425,12 +1453,11 @@ class ReadinessTests(unittest.TestCase):
             "knowledge_base_name": "demo-knowledge", "ontology_check_knowledge_base_name": "demo-ontology-check",
             "knowledge_source_names": sources,
             "ontology_knowledge_sources": {deploy.SCENARIO.registration: {"knowledge_source_name": "demo-scenario-ontology"}},
-            "public_context_knowledge_base_name": "demo-public-context", "public_context_knowledge_source_name": "web",
         }
         ctx = make_context(self, make_root(self))
         ctx.cache["outputs"] = ready
         with mock.patch.object(deploy, "wait_ingestion", return_value={"synchronizations": 1}) as ingestion, \
-                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ verified"), \
+                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ wired") as web_iq, \
                 mock.patch.object(deploy, "verify_work_iq", return_value={
                     "enabled": True, "connection": "work-iq", "consent": "granted"}) as work_iq, \
                 mock.patch.object(deploy, "prove_retrieval", return_value={"references": 1}) as retrieval:
@@ -1443,7 +1470,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual([call.args[1:] for call in ingestion.call_args_list],
                          [(f"https://srch.search.windows.net/knowledgesources/{name}/status?api-version=v1", name)
                           for _, name in sorted(sources.items())])
-        ontology, document, public = (call.args[1:4] for call in retrieval.call_args_list)
+        ontology, document = (call.args[1:4] for call in retrieval.call_args_list)
         self.assertEqual(ontology[0], "https://srch.search.windows.net/knowledgebases/demo-ontology-check/retrieve?api-version=v1")
         self.assertEqual((ontology[1], ontology[2]["kind"], ontology[2]["knowledgeSourceName"]),
                          (deploy.SCENARIO.ontology_question, "fabricOntology", "demo-scenario-ontology"))
@@ -1451,8 +1478,15 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual((document[1], document[2]["kind"], document[2]["knowledgeSourceName"]),
                          (deploy.SCENARIO.document_question, "indexedOneLake", "demo-documents"))
         # Only the agents' minimal-effort knowledge base takes the question as a search intent.
-        self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True, False])
-        self.assertTrue(public[0].startswith("https://srch.search.windows.net/knowledgebases/demo-public-context/retrieve?"))
+        self.assertEqual([call.kwargs.get("intents", False) for call in retrieval.call_args_list], [False, True])
+        # A passage of the starter document alone does not prove the approved document is indexed.
+        evaluate = retrieval.call_args_list[1].args[4]
+        self.assertEqual(evaluate({"activity": [{"type": "indexedOneLake"}], "references": [
+            {"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document("starter.txt")}}]})[0],
+            [f"no indexedOneLake reference to {deploy.SCENARIO.document_file}"])
+        # Only Agent Service can use the project identity, so the runner checks the Web IQ wiring, not a search.
+        self.assertEqual(web_iq.call_args.args[1:], ())
+        self.assertIn("Web IQ wired", report)
         self.assertIn("ingestion succeeded for 3 OneLake folder source(s)", report)
         self.assertIn("live ontology retrieval through demo-ontology-check and document retrieval through demo-knowledge",
                       report)
@@ -1499,12 +1533,12 @@ class ReadinessTests(unittest.TestCase):
         http = FakeHttp()
         http.add("POST", r"/retrieve\?api-version=", reply(body={
             "activity": [{"type": "indexedOneLake", "knowledgeSourceName": "docs"}],
-            "references": [{"type": "indexedOneLake"}]}))
+            "references": [{"type": "indexedOneLake", "sourceData": {"doc_url": onelake_document("policy-v1.md")}}]}))
         ctx = make_context(self, root, FakeShell([TOKEN_RULE]), http)
         evidence = deploy.prove_retrieval(
             ctx, "https://srch.search.windows.net/knowledgebases/kb/retrieve?api-version=x", "q",
             {"kind": "indexedOneLake", "knowledgeSourceName": "docs"},
-            lambda body: deploy.document_evidence(body, "docs"), intents=True)
+            lambda body: deploy.document_evidence(body, "docs", "policy-v1.md"), intents=True)
         _, _, body, _ = http.calls[0]
         self.assertEqual(body["intents"], [{"type": "semantic", "search": "q"}])
         self.assertNotIn("messages", body)
@@ -1524,8 +1558,10 @@ class ReadinessTests(unittest.TestCase):
 
 SEARCH_URL = ("https://management.azure.com/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Search"
               "/searchServices/srch-demo?api-version=2026-09-01-preview")
-OFFERINGS = {"regions": [{"regionName": "centralus", "skus": [{"name": "basic"}, {"name": "serverless"}]},
-                         {"regionName": "westeurope", "skus": [{"name": "basic"}]}]}
+# As fetchOfferings returns them: each tier's name in sku.name, beside its limits.
+OFFERINGS = {"regions": [{"regionName": "centralus", "skus": [{"sku": {"name": "basic"}, "limits": {"indexes": 15}},
+                                                           {"sku": {"name": "serverless"}, "limits": {}}]},
+                         {"regionName": "westeurope", "skus": [{"sku": {"name": "basic"}, "limits": {"indexes": 15}}]}]}
 
 
 def search_service(principal=None, state="Succeeded", status="running"):
@@ -1935,7 +1971,7 @@ class SignInTests(unittest.TestCase):
         probes = ctx.shell.matching(command("az", "account", "get-access-token"))
         self.assertEqual({requested_audience(call) for call in probes},
                          {deploy.ARM_API + "/", deploy.GRAPH_API, deploy.FABRIC_API, "api://client/.default",
-                          deploy.SEARCH_RESOURCE, deploy.FOUNDRY_SCOPE})
+                          deploy.SEARCH_RESOURCE, deploy.KUSTO_RESOURCE, deploy.FOUNDRY_SCOPE})
         self.assertTrue(all(call[call.index("--tenant") + 1] == TENANT for call in probes))
         for expected in ("GitHub CLI for example/demo-repo", f"Azure CLI in tenant {TENANT}", "Microsoft Foundry"):
             self.assertIn(expected, summary)
@@ -1994,12 +2030,13 @@ class SignInTests(unittest.TestCase):
         self.assertIn("Run: gh auth login --hostname github.com --git-protocol https --web", stop.exception.next_steps)
         self.assertEqual(ctx.shell.calls, [["gh", "auth", "status", "--hostname", "github.com"]])
 
-    def test_foundry_is_signed_in_to_only_when_the_agent_phase_runs(self):
-        for through, expected in (("verify", False), ("agent", True)):
+    def test_foundry_and_the_kql_database_are_signed_in_to_only_when_their_phases_run(self):
+        for through, kql, foundry in (("verify", False, False), ("reprint", True, False), ("agent", True, True)):
             with self.subTest(through=through):
                 ctx = self.context(SIGNED_IN, deploy.PHASES[:deploy.PHASES.index(through) + 1])
-                self.assertEqual(("Microsoft Foundry", {"scope": deploy.FOUNDRY_SCOPE}) in deploy.token_audiences(ctx),
-                                 expected)
+                audiences = deploy.token_audiences(ctx)
+                self.assertEqual(("the KQL database", {"resource": deploy.KUSTO_RESOURCE}) in audiences, kql)
+                self.assertEqual(("Microsoft Foundry", {"scope": deploy.FOUNDRY_SCOPE}) in audiences, foundry)
 
     def test_only_the_token_audiences_that_fail_are_signed_in_again(self):
         def token(args, options):
@@ -2299,9 +2336,10 @@ class StateAndCliTests(unittest.TestCase):
                     contextlib.redirect_stderr(io.StringIO()):
                 deploy.parse_arguments(["up", "--approve", value])
             self.assertEqual(stop.exception.code, deploy.USAGE)
-        self.assertEqual(set(deploy.APPROVAL_KEYS), {"identity", "platform", "knowledge", "app", "destroy", "item-update",
-                                                     "knowledge-registration", "agent-publish", "app-build",
-                                                     "purge-foundry", "shared-action-group"})
+        self.assertEqual(set(deploy.APPROVAL_KEYS), {"identity", "platform", "knowledge", "reprint", "app", "destroy",
+                                                     "item-update", "knowledge-registration", "agent-publish",
+                                                     "app-build", "reprint-build", "reprint-roles", "purge-foundry",
+                                                     "shared-action-group"})
         self.assertEqual(set(deploy.DESTRUCTIVE_APPROVALS), {"destroy", "purge-foundry", "item-update",
                                                              "shared-action-group"})
 
@@ -2346,11 +2384,13 @@ class FakeFoundry(FakeHttp):
 class AgentAndAppTests(unittest.TestCase):
     ENDPOINT = "https://ai-demo.services.ai.azure.com/api/projects/demo"
     SEARCH = "https://srch.search.windows.net"
-    AGENTS = {"with_iq": ("demo-with-iq", "Scenario assistant – with IQ"),
-              "without_iq": ("demo-without-iq", "Scenario assistant – without IQ")}
-    WITH_IQ_TOOLS = ["fabric_iq_ontology", "foundry_iq_knowledge", "web_iq_public_context", "work_iq_mail"]
+    AGENTS = {"with_iq": ("demo-with-iq", "Book performance assistant – with IQ"),
+              "without_iq": ("demo-without-iq", "Book performance assistant – without IQ")}
+    WITH_IQ_TOOLS = ["fabric_iq_ontology", "foundry_iq_knowledge", "reprint_request", "web_iq_public_context",
+                     "work_iq_mail"]
     REGISTRY = "crdemoab12"
     APP_URL = "https://ca-demo.blue-sea-123.swedencentral.azurecontainerapps.io"
+    REPRINT_URL = "https://ca-demo-mcp.blue-sea-123.swedencentral.azurecontainerapps.io"
     CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
     APP_PRINCIPAL = "acacacac-acac-4cac-8cac-acacacacacac"
     FOUNDRY_PRINCIPAL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -2367,9 +2407,9 @@ class AgentAndAppTests(unittest.TestCase):
             "foundry_tool_connections": {
                 "knowledge_base": {"name": "demo-knowledge-mcp",
                                    "server_url": f"{self.SEARCH}/knowledgebases/demo-knowledge/mcp?api-version=v1"},
-                "public_context": {"name": "public-context-mcp",
-                                   "server_url": f"{self.SEARCH}/knowledgebases/demo-public-context/mcp?api-version=v1"},
-                "work_iq_mail": mail if work_iq else None},
+                "public_context": {"name": "web-iq", "server_url": "https://api.microsoft.ai/v3/mcp"},
+                "work_iq_mail": mail if work_iq else None,
+                "reprint_request": {"name": "reprint-request", "server_url": f"{self.REPRINT_URL}/mcp"}},
             "fabric_iq_connections": {deploy.SCENARIO.registration: {
                 "name": "fabric-iq-scenario", "server_url": f"https://api.fabric.microsoft.com/v1/mcp/dataPlane/"
                                                             f"workspaces/{WORKSPACE}/items/{ONTOLOGY}/ontologyEndpoint"}},
@@ -2436,7 +2476,12 @@ class AgentAndAppTests(unittest.TestCase):
         self.assertEqual((tools["work_iq_mail"]["project_connection_id"], tools["work_iq_mail"]["server_url"]),
                          ("work-iq", "https://workiq.svc.cloud.microsoft/mcp"))
         self.assertEqual(tools["foundry_iq_knowledge"]["project_connection_id"], "demo-knowledge-mcp")
-        self.assertEqual(tools["web_iq_public_context"]["project_connection_id"], "public-context-mcp")
+        self.assertEqual((tools["web_iq_public_context"]["server_url"], tools["web_iq_public_context"]["project_connection_id"]),
+                         ("https://api.microsoft.ai/v3/mcp", "web-iq"))
+        # The one tool that acts asks the user to approve each call, through its own server and connection.
+        self.assertEqual((tools["reprint_request"]["server_url"], tools["reprint_request"]["project_connection_id"],
+                          tools["reprint_request"]["require_approval"], tools["reprint_request"]["allowed_tools"]),
+                         (f"{self.REPRINT_URL}/mcp", "reprint-request", "always", ["submit_reprint_request"]))
         for method, url, body, headers in http.calls:
             self.assertEqual(headers["Authorization"], f"Bearer {TOKEN}")
         scopes = {call[call.index("--scope") + 1] for call in ctx.shell.matching(command("az", "account", "get-access-token"))}
@@ -2547,6 +2592,8 @@ class AgentAndAppTests(unittest.TestCase):
                 {"foundry_tool_connections": {**tools, "knowledge_base": None}},
             "missing from Terraform outputs: work_iq_mail_connection, work_iq_mail_mcp_endpoint":
                 {"foundry_tool_connections": {**tools, "work_iq_mail": None}},
+            "missing from Terraform outputs: reprint_request_connection, reprint_request_mcp_endpoint":
+                {"foundry_tool_connections": {**tools, "reprint_request": None}},
             "not a Foundry project endpoint": {"foundry_project_endpoint": "https://example.com/api/projects/demo"},
             "must name exactly the with_iq and without_iq agents": {"foundry_agents": {}},
             "with_iq entry must name": {"foundry_agents": {**self.outputs()["foundry_agents"],
@@ -2606,7 +2653,6 @@ class AgentAndAppTests(unittest.TestCase):
         http.add("GET", r"/api/config$", reply(body={"mock": False, "clientId": client or self.CLIENT, "tenantId": TENANT}))
         ctx = make_context(self, root, FakeShell(rules), http)
         ctx.initialized = True
-        ctx.environ["WEB_IQ_API_KEY"] = "web-iq-key"
         ctx.cache["outputs"] = self.outputs()
         ctx.state.section("target").update(tenant_id=TENANT, subscription_id="sub", user_object_id="user")
         return ctx, tag
@@ -2711,10 +2757,241 @@ class AgentAndAppTests(unittest.TestCase):
 
     def test_the_app_phase_reports_how_to_use_and_compare_the_deployment(self):
         steps = " ".join(deploy.APP_NEXT)
-        for text in ("sign in", "consent card", "Ask both", "second user", deploy.SCENARIO.app_question):
+        for text in ("sign in", "consent card", "Prepare the request", "Compare without IQ", "second user",
+                     deploy.SCENARIO.app_question):
             self.assertIn(text, steps)
         for retired in ("ms app", "Power Platform", "rehearse", "presenter"):
             self.assertNotIn(retired, steps)
+
+
+class FakeKusto(FakeHttp):
+    """A KQL endpoint's management commands over an in-memory principal list; other routes behave as in FakeHttp."""
+
+    def __init__(self, origin, databases, principals=()):
+        super().__init__()
+        self.origin, self.databases, self.principals = origin, databases, list(principals)
+        # Refuses role changes, as for a user who can't manage the database's principals.
+        self.refuse_grants = False
+
+    def request(self, method, url, headers=None, body=None, timeout=120, attempts=None):
+        if method != "POST" or url != f"{self.origin}/v1/rest/mgmt":
+            return super().request(method, url, headers, body, timeout, attempts)
+        self.calls.append((method, url, body, dict(headers or {})))
+        self.attempts.append(attempts)
+        command = body["csl"]
+        if command == ".show databases":
+            return self.table(["DatabaseName", "PrettyName"], self.databases)
+        shown = re.fullmatch(r"\.show database \['([^']+)'\] principals", command)
+        if shown:
+            return self.table(["Role", "PrincipalType", "PrincipalFQN"],
+                              [[f"Database {shown[1]} {role}", "AAD Application", fqn] for role, fqn in self.principals])
+        added = re.fullmatch(r"\.add database \['([^']+)'\] (viewers|ingestors) \('([^']+)'\) 'reprint request server'",
+                             command)
+        if added and self.refuse_grants:
+            return reply(403, {"error": {"code": "Forbidden", "message": "Principal is not authorized."}})
+        if added and body.get("db") == added[1]:
+            self.principals.append(({"viewers": "Viewer", "ingestors": "Ingestor"}[added[2]], added[3]))
+            return self.table(["Role", "PrincipalType", "PrincipalFQN"], [])
+        raise AssertionError(f"unexpected KQL command: {command}")
+
+    @staticmethod
+    def table(columns, rows):
+        return reply(body={"Tables": [{"TableName": "Table_0", "Columns": [{"ColumnName": name} for name in columns],
+                                       "Rows": [list(row) for row in rows]}]})
+
+    def commands(self, prefix):
+        return [(body["csl"], body.get("db")) for method, url, body, _ in self.calls
+                if url.endswith("/v1/rest/mgmt") and body["csl"].startswith(prefix)]
+
+
+class ReprintPhaseTests(unittest.TestCase):
+    REGISTRY = "crdemoab12"
+    URL = "https://ca-demo-mcp.blue-sea-123.swedencentral.azurecontainerapps.io"
+    KUSTO = "https://trd-abc123.z1.kusto.fabric.microsoft.com"
+    IDENTITY = "abababab-abab-4bab-8bab-abababababab"
+    API = "bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc"
+    API_PRINCIPAL = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd"
+    CLIENT = "dededede-dede-4ede-8ede-dededededede"
+    CLIENT_PRINCIPAL = "efefefef-efef-4fef-8fef-efefefefefef"
+    GRAPH_PRINCIPAL = "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0"
+    LISTING = ("100644 blob 3333333333333333333333333333333333333333\tscenario/workflows/reprint-request/Dockerfile\n"
+               "100644 blob 4444444444444444444444444444444444444444\tscenario/workflows/reprint-request/src/main.ts\n")
+
+    def registration(self, applied=None):
+        return {"mcp_endpoint": f"{self.URL}/mcp", "url": self.URL if applied else None, "name": "ca-demo-mcp",
+                "image_tag": applied, "repository": "reprint-request", "tenant_id": TENANT,
+                "connection_name": "reprint-request", "oauth_redirect_url": "https://global.consent.azure-apim.net/redirect",
+                "api_client_id": self.API, "client_id": self.CLIENT, "service_principal_object_id": self.CLIENT_PRINCIPAL,
+                "delegated_scopes": ["ReprintRequest.Submit"], "api_permissions_url": "https://portal.azure.com/#reprint",
+                "identity_client_id": self.IDENTITY, "kql_database": "BookSignals"}
+
+    def context(self, *, databases=((KQL, "BookSignals"),), principals=(), ready=(True,), status="", tags=()):
+        root = make_root(self)
+        tfvars = root / "infra" / "terraform.tfvars"
+        tfvars.write_text('project_name = "demo"\nreprint_image_tag = null # deploy.py sets it\n', encoding="utf-8")
+        tag = deploy.hashlib.sha256(self.LISTING.encode()).hexdigest()[:12]
+        built = list(tags)
+
+        def show_tags(args, options):
+            if not built:
+                return deploy.Result(1, "", "ERROR: Error: repository name not known to registry. Correlation ID: x.")
+            return deploy.Result(0, json.dumps(built))
+
+        def build(args, options):
+            built.append(tag)
+            return deploy.Result(0, "Run ID: ca2 was successful after 1m10s")
+
+        def output(args, options):
+            applied = re.search(r'(?m)^reprint_image_tag = "([0-9a-f]{12})"', tfvars.read_text(encoding="utf-8"))
+            values = {"dev_workspace_id": WORKSPACE, "reprint_request": self.registration(
+                applied[1] if applied and ctx.shell.matching(terraform("apply")) else None),
+                "container_registry": {"name": self.REGISTRY, "repository": "app"}}
+            return deploy.Result(0, json.dumps({name: {"value": value} for name, value in values.items()}))
+
+        def principal(args, options):
+            resource = args[args.index("--id") + 1]
+            return deploy.Result(0, json.dumps({"id": {self.API: self.API_PRINCIPAL,
+                                                       deploy.GRAPH_APP_ID: self.GRAPH_PRINCIPAL}[resource]}))
+
+        rules = [
+            TOKEN_RULE,
+            (command("az", "ad", "sp", "show"), principal),
+            (command("git", "status", "--porcelain"), deploy.Result(0, status)),
+            (command("git", "ls-tree", "-r", "HEAD"), deploy.Result(0, self.LISTING)),
+            (command("az", "acr", "repository", "show-tags"), show_tags),
+            (command("az", "acr", "build"), build),
+            (terraform("output"), output),
+            (terraform("console"), deploy.Result(0, json.dumps(json.dumps({"fabric_git_enabled": False})))),
+            *plan_rules([("azurerm_container_app.reprint[0]", ["create"])]),
+        ]
+        http = FakeKusto(self.KUSTO, [list(row) for row in databases], principals)
+        http.add("GET", rf"/workspaces/{WORKSPACE}/items$", reply(body=ITEMS))
+        http.add("GET", rf"/workspaces/{WORKSPACE}/kqlDatabases/{KQL}$",
+                 reply(body={"id": KQL, "workspaceId": WORKSPACE, "properties": {"queryServiceUri": self.KUSTO}}))
+        http.add("GET", r"/v1/rest/auth/metadata$",
+                 reply(body={"AzureAD": {"KustoServiceResourceId": "https://kusto.kusto.windows.net"}}))
+        api = {"consentType": "AllPrincipals", "resourceId": self.API_PRINCIPAL, "scope": "ReprintRequest.Submit"}
+        graph = {"consentType": "AllPrincipals", "resourceId": self.GRAPH_PRINCIPAL, "scope": "offline_access"}
+        # Each scope is missing until granted: the server's own, then Graph's.
+        http.add("GET", r"/oauth2PermissionGrants$", *[reply(body={"value": grants})
+                                                       for grants in ([], [api], [api], [api, graph])])
+        http.add("POST", r"/v1\.0/oauth2PermissionGrants$", reply(201, {}))
+        http.add("GET", r"/healthz$", reply(200))
+        http.add("GET", r"/readyz$", *[reply(200 if ok else 503, {"ready": ok, "roles": ["Viewer", "Ingestor"] if ok
+                                                                  else ["Viewer"]}) for ok in ready])
+        ctx = make_context(self, root, FakeShell(rules), http)
+        ctx.initialized = True
+        ctx.state.section("target").update(tenant_id=TENANT, subscription_id="sub", user_object_id="user")
+        return ctx, tag
+
+    def test_the_server_is_granted_its_roles_built_and_deployed_by_its_reviewed_plan(self):
+        ctx, tag = self.context()
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint-roles")
+        self.assertIn(f"({self.IDENTITY}) Database Viewer and Database Ingestor on KQL database BookSignals",
+                      stop.exception.message)
+        self.assertFalse(ctx.http.commands(".add"))
+        ctx.args.approve = {"reprint-roles": True}
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint-build")
+        # Exactly the two roles, on the database Kusto names, for the server's identity alone.
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        self.assertEqual(ctx.http.commands(".add"), [
+            (f".add database ['{KQL}'] viewers ('{principal}') 'reprint request server'", KQL),
+            (f".add database ['{KQL}'] ingestors ('{principal}') 'reprint request server'", KQL)])
+        ctx.args.approve = {"reprint-build": True}
+        with self.assertRaises(deploy.NeedsApproval) as stop:
+            deploy.phase_reprint(ctx)
+        self.assertEqual(stop.exception.approval["key"], "reprint")
+        build, = ctx.shell.matching(command("az", "acr", "build"))
+        context = "scenario/workflows/reprint-request"
+        self.assertEqual(build, ["az", "acr", "build", "--registry", self.REGISTRY, "--image", f"reprint-request:{tag}",
+                                 "--file", f"{context}/Dockerfile", "--platform", "linux/amd64", "--only-show-errors",
+                                 context])
+        self.assertEqual(ctx.shell.matching(command("git", "status", "--porcelain"))[0][-2:], ["--", context])
+        plan, = ctx.shell.matching(terraform("plan"))
+        self.assertIn(f"-var=reprint_image_tag={tag}", plan)
+        self.assertIn("reprint_image_tag = null", (ctx.root / "infra" / "terraform.tfvars").read_text(encoding="utf-8"))
+        ctx.args.approve = {"reprint": stop.exception.approval["sha256"][:12]}
+        report = deploy.phase_reprint(ctx)
+        self.assertIn(f'reprint_image_tag = "{tag}" # deploy.py sets it',
+                      (ctx.root / "infra" / "terraform.tfvars").read_text(encoding="utf-8"))
+        self.assertIn(f"{self.URL} runs reprint-request:{tag}", report)
+        self.assertIn("Not proof of a write", report)
+        # The connection's client is granted exactly its declared scopes, on each scope's own resource.
+        grants = sorted((body["clientId"], body["resourceId"], body["scope"])
+                        for _, body in ctx.http.posts(r"oauth2PermissionGrants$"))
+        self.assertEqual(grants, sorted([(self.CLIENT_PRINCIPAL, self.API_PRINCIPAL, "ReprintRequest.Submit"),
+                                         (self.CLIENT_PRINCIPAL, self.GRAPH_PRINCIPAL, "offline_access")]))
+        self.assertEqual(len(ctx.shell.matching(command("az", "acr", "build"))), 1, "the image is built once")
+        self.assertEqual(len(ctx.http.commands(".add")), 2, "the roles are granted once")
+        self.assertEqual(ctx.state.section("reprint")["image_tag"], tag)
+        self.assertEqual(ctx.state.section("reprint")["roles"]["database"], KQL)
+
+    def test_held_roles_need_no_grant_and_a_display_named_database_resolves(self):
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        ctx, tag = self.context(databases=(("BookSignals", ""),), tags=[None],
+                                principals=(("Viewer", principal), ("Ingestor", principal)))
+        ctx.shell.rules.insert(0, (command("az", "acr", "repository", "show-tags"), deploy.Result(0, json.dumps([tag]))))
+        ctx.args.yes = True
+        self.assertIn(f"runs reprint-request:{tag}", deploy.phase_reprint(ctx))
+        self.assertFalse(ctx.http.commands(".add"))
+        self.assertFalse(ctx.shell.matching(command("az", "acr", "build")))
+        self.assertEqual({database for _, database in ctx.http.commands(".show database [")}, {"BookSignals"})
+
+    def test_an_ambiguous_or_foreign_database_is_never_granted(self):
+        for databases in (((KQL, "BookSignals"), ("BookSignals", "")), (("Other", "Other"),)):
+            with self.subTest(databases=databases):
+                ctx, _ = self.context(databases=databases)
+                ctx.args.yes = True
+                with self.assertRaisesRegex(deploy.Blocked, "exactly one BookSignals database"):
+                    deploy.phase_reprint(ctx)
+                self.assertFalse(ctx.http.commands(".add"))
+        ctx, _ = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(rf"/kqlDatabases/{KQL}$"), [reply(body={
+            "workspaceId": EVENTHOUSE, "properties": {"queryServiceUri": self.KUSTO}})]))
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Blocked, "outside DEV"):
+            deploy.phase_reprint(ctx)
+
+    def test_an_endpoint_without_sign_in_metadata_takes_kustos_documented_audience(self):
+        ctx, _ = self.context()
+        ctx.http.routes.insert(0, ("GET", re.compile(r"/v1/rest/auth/metadata$"), [reply(404)]))
+        self.assertEqual(deploy.kusto_resource(ctx, self.KUSTO), deploy.KUSTO_RESOURCE)
+        ctx.forget()
+        ctx.http.routes.insert(0, ("GET", re.compile(r"/v1/rest/auth/metadata$"), [reply(503)]))
+        with self.assertRaisesRegex(deploy.Blocked, "sign-in metadata failed with HTTP 503"):
+            deploy.kusto_resource(ctx, self.KUSTO)
+
+    def test_a_refused_role_grant_names_the_grant_an_administrator_gives(self):
+        ctx, _ = self.context()
+        ctx.http.refuse_grants = True
+        ctx.args.yes = True
+        with self.assertRaises(deploy.MissingPermission) as stop:
+            deploy.phase_reprint(ctx)
+        grant, = stop.exception.grants
+        principal = f"aadapp={self.IDENTITY};{TENANT}"
+        self.assertIn(f".add database ['{KQL}'] viewers ('{principal}') 'reprint request server' and "
+                      f".add database ['{KQL}'] ingestors ('{principal}') 'reprint request server'", grant)
+        self.assertFalse(ctx.http.principals)
+        self.assertFalse(ctx.shell.matching(command("az", "acr", "build")))
+
+    def test_uncommitted_server_files_are_never_built(self):
+        ctx, _ = self.context(status=" M scenario/workflows/reprint-request/src/main.ts\n")
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Blocked, "uncommitted changes"):
+            deploy.phase_reprint(ctx)
+        self.assertFalse(ctx.shell.matching(command("az", "acr")))
+
+    def test_a_server_that_never_sees_both_roles_is_not_ready(self):
+        ctx, _ = self.context(ready=(False,))
+        ctx.args.yes = True
+        with self.assertRaisesRegex(deploy.Waiting, "does not see its KQL database roles"):
+            deploy.phase_reprint(ctx)
+        self.assertNotIn("verified_at", ctx.state.section("reprint"))
+        self.assertFalse(ctx.http.posts(r"oauth2PermissionGrants$"))
 
 
 class FoundryPreflightTests(unittest.TestCase):
@@ -2874,19 +3151,28 @@ class RetryTests(unittest.TestCase):
 
 class WebIqTests(unittest.TestCase):
     RESOURCE_ID = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.WebIQ/accounts/demo"
+    PROJECT_ID = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/ai/projects/demo"
+    CLIENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    KEYLESS = {"category": "RemoteTool", "authType": "ProjectManagedIdentity", "target": "https://api.microsoft.ai/v3/mcp",
+               "audience": "https://api.microsoft.ai", "isSharedToAll": False}
 
-    def web_context(self, *, key=None, state="Succeeded", search=None):
+    def web_context(self, *, state="Succeeded", connection=KEYLESS, bound=None, response=None):
         http = FakeHttp()
         http.add("GET", r"/providers/Microsoft\.WebIQ/accounts/demo\?api-version=2026-06-01-preview$",
                  reply(body={"id": self.RESOURCE_ID, "properties": {"provisioningState": state}}))
-        if search:
-            http.add("POST", r"^https://api\.microsoft\.ai/v3/search/web$", search)
-        ctx = make_context(self, make_root(self), FakeShell([TOKEN_RULE]), http)
-        ctx.cache["outputs"] = {"web_iq": {"resource_id": self.RESOURCE_ID}}
+        http.add("GET", r"/accounts/ai/projects/demo/connections/web-iq\?api-version=2025-10-01-preview$",
+                 response or reply(body={"name": "web-iq", "properties": connection}))
+        ctx = make_context(self, make_root(self), FakeShell([TOKEN_RULE]), http, web_iq_bound=bound)
+        ctx.cache["outputs"] = {
+            "web_iq": {"resource_id": self.RESOURCE_ID, "mcp_endpoint": "https://api.microsoft.ai/v3/mcp",
+                       "connection_name": "web-iq", "client_id": self.CLIENT},
+            "foundry_project_id": self.PROJECT_ID,
+        }
         ctx.state.section("target")["subscription_id"] = "sub"
-        if key:
-            ctx.environ["WEB_IQ_API_KEY"] = key
         return ctx
+
+    def verify(self, ctx):
+        return deploy.verify_web_iq(ctx)
 
     def test_missing_web_iq_output_blocks_readiness_without_cloud_calls(self):
         ctx = make_context(self, make_root(self))
@@ -2894,7 +3180,7 @@ class WebIqTests(unittest.TestCase):
             with self.subTest(outputs=outputs):
                 ctx.cache["outputs"] = outputs
                 with self.assertRaisesRegex(deploy.Blocked, "Terraform outputs are missing: web_iq"):
-                    deploy.verify_web_iq(ctx)
+                    self.verify(ctx)
                 self.assertFalse(ctx.http.calls)
                 self.assertFalse(ctx.shell.calls)
 
@@ -2909,7 +3195,8 @@ class WebIqTests(unittest.TestCase):
             ctx.shell = FakeShell([(command("az", "provider", "show"), deploy.Result(0, json.dumps(provider)))])
             values = {"web_iq_terms_accepted": True}
             if succeeds:
-                self.assertIn("portal AppID linking remains manual", deploy.check_web_iq(ctx, "sub", values))
+                self.assertIn("binding the Foundry project identity to the account's AppID in the Web IQ portal "
+                              "remains manual", deploy.check_web_iq(ctx, "sub", values))
             else:
                 with self.assertRaisesRegex(deploy.Blocked, "pinned Web IQ accounts API"):
                     deploy.check_web_iq(ctx, "sub", values)
@@ -2932,86 +3219,95 @@ class WebIqTests(unittest.TestCase):
                 deploy.phase_verify(ctx)
         self.assertEqual(retrieval.call_count, 2)
         self.assertNotIn("dev_ready_at", ctx.state.section("verify"))
-        ctx.cache["outputs"].update(public_context_knowledge_base_name="demo public", public_context_knowledge_source_name="web")
         with mock.patch.object(deploy, "wait_ingestion", return_value={}), \
-                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ verified"), \
+                mock.patch.object(deploy, "verify_web_iq", return_value="Web IQ wired"), \
                 mock.patch.object(deploy, "verify_work_iq",
                                   return_value={"enabled": True, "connection": "work-iq", "consent": "granted"}), \
                 mock.patch.object(deploy, "prove_retrieval", return_value={"references": 2}) as retrieval:
-            self.assertIn("Web IQ public context retrieved through Foundry IQ (2 cited references)", deploy.phase_verify(ctx))
-        url, question, parameters = retrieval.call_args.args[1:4]
-        self.assertTrue(url.startswith("https://demo.search.windows.net/knowledgebases/demo%20public/retrieve?api-version="))
-        self.assertEqual((question, parameters["kind"], retrieval.call_args.kwargs), (
-            deploy.SCENARIO.public_context_question, "mcpServer", {"attempts": 1}))
+            self.assertIn("; Web IQ wired; ", deploy.phase_verify(ctx))
+        self.assertEqual(retrieval.call_count, 2)
         self.assertIn("dev_ready_at", ctx.state.section("verify"))
 
-    def test_a_provisioned_account_waits_for_portal_onboarding_not_automatic_keys(self):
+    def test_a_keyless_route_waits_for_the_operator_to_confirm_the_binding(self):
         ctx = self.web_context()
-        with self.assertRaisesRegex(deploy.Waiting, "authenticated search is unverified") as stop:
-            deploy.verify_web_iq(ctx)
-        self.assertIn(deploy.WEB_IQ_PORTAL, " ".join(stop.exception.next_steps))
-        self.assertEqual(ctx.state.section("web_iq")["status"], "onboarding_pending")
-        self.assertFalse(ctx.http.posts("search/web"))
+        with self.assertRaisesRegex(deploy.Waiting, "confirmed binding the Foundry project identity") as stop:
+            self.verify(ctx)
+        steps = " ".join(stop.exception.next_steps)
+        for expected in (deploy.WEB_IQ_PORTAL, self.RESOURCE_ID, f"enter {self.CLIENT}", f"--web-iq-bound {self.CLIENT}"):
+            self.assertIn(expected, steps)
+        receipt = ctx.state.section("web_iq")
+        self.assertEqual((receipt["status"], receipt["connection"], receipt["client_id"]),
+                         ("binding_unconfirmed", "web-iq", self.CLIENT))
+        # Nothing billable: the runner never calls Web IQ itself, only reads the account and the connection.
+        self.assertEqual([call[0] for call in ctx.http.calls], ["GET", "GET"])
 
-    def test_provisioning_and_target_failures_never_send_the_key(self):
+    def test_the_confirmation_must_name_the_identity_and_lasts_only_for_it(self):
+        ctx = self.web_context(bound="dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        with self.assertRaisesRegex(deploy.Blocked, f"client\\) ID is {self.CLIENT}"):
+            self.verify(ctx)
+        self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+        ctx.args.web_iq_bound = self.CLIENT
+        message = self.verify(ctx)
+        self.assertIn(f"through the web-iq connection as the Foundry project identity ({self.CLIENT})", message)
+        self.assertIn("Web IQ retrieval and agent/app integration remain unverified", message)
+        receipt = ctx.state.section("web_iq")
+        self.assertEqual((receipt["status"], receipt["bound_client_id"], receipt["retrieval"]),
+                         ("bound_unverified", self.CLIENT, "unverified"))
+        # A later run keeps the confirmation, until the project identity, and so its client ID, changes.
+        ctx.args.web_iq_bound = None
+        self.assertEqual(self.verify(ctx), message)
+        ctx.cache["outputs"]["web_iq"]["client_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        with self.assertRaises(deploy.Waiting):
+            self.verify(ctx)
+        self.assertEqual(deploy.parse_arguments(["up", "--web-iq-bound", self.CLIENT.upper()]).web_iq_bound,
+                         self.CLIENT)
+        with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(io.StringIO()):
+            deploy.parse_arguments(["up", "--web-iq-bound", "not-a-client-id"])
+        self.assertEqual(stop.exception.code, deploy.USAGE)
+
+    def test_only_the_project_identitys_connection_to_web_iq_is_keyless(self):
+        ctx = self.web_context(connection={**self.KEYLESS, "audience": "https://api.microsoft.ai/"}, bound=self.CLIENT)
+        self.assertIn("wired keylessly", self.verify(ctx))
+        for change in ({"authType": "ApiKey"}, {"authType": "UserEntraToken"}, {"category": "CustomKeys"},
+                       {"target": "https://api.microsoft.ai/v3/search/web"}, {"audience": "https://search.azure.com/"},
+                       {"audience": None}):
+            with self.subTest(change=change):
+                ctx = self.web_context(connection={**self.KEYLESS, **change}, bound=self.CLIENT)
+                with self.assertRaisesRegex(deploy.Blocked, "connection web-iq doesn't call https://api.microsoft.ai/v3/mcp "
+                                                            "keylessly as the project identity"):
+                    self.verify(ctx)
+                self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+
+    def test_provisioning_target_and_missing_route_failures_stop_before_the_binding(self):
         for state, error in (("Creating", deploy.Waiting), ("Failed", deploy.Blocked), ("Canceled", deploy.Blocked)):
-            ctx = self.web_context(key="private-key", state=state)
+            ctx = self.web_context(state=state, bound=self.CLIENT)
             with self.assertRaises(error):
-                deploy.verify_web_iq(ctx)
-            self.assertFalse(ctx.http.posts("search/web"))
-            self.assertNotIn("private-key", json.dumps(ctx.http.calls))
-        ctx = self.web_context(key="private-key")
+                self.verify(ctx)
+            self.assertFalse([call for call in ctx.http.calls if "/connections/" in call[1]])
+        for missing in ("connection_name", "client_id", "mcp_endpoint"):
+            ctx = self.web_context(bound=self.CLIENT)
+            ctx.cache["outputs"]["web_iq"][missing] = None
+            with self.subTest(missing=missing), self.assertRaisesRegex(
+                    deploy.Blocked, "no web-iq connection, Web IQ MCP endpoint or Foundry project identity client ID"):
+                self.verify(ctx)
+        for project in (self.PROJECT_ID.replace("/sub/", "/another/"),
+                        self.PROJECT_ID.rsplit("/projects/", 1)[0]):
+            ctx = self.web_context(bound=self.CLIENT)
+            ctx.cache["outputs"]["foundry_project_id"] = project
+            with self.subTest(project=project), self.assertRaisesRegex(deploy.Blocked, "not a Foundry project"):
+                self.verify(ctx)
+            self.assertFalse([call for call in ctx.http.calls if "/connections/" in call[1]])
+        # The connection is an ordinary read: transient failures are retried, then reported.
+        ctx = self.web_context(bound=self.CLIENT, response=reply(503))
+        with self.assertRaisesRegex(deploy.ServiceError, "Reading Foundry connection web-iq"):
+            self.verify(ctx)
+        self.assertEqual(len([call for call in ctx.http.calls if "/connections/" in call[1]]), 5)
+        self.assertNotIn("bound_client_id", ctx.state.section("web_iq"))
+        ctx = self.web_context(bound=self.CLIENT)
         ctx.cache["outputs"]["web_iq"]["resource_id"] = self.RESOURCE_ID.replace("/sub/", "/another/")
         with self.assertRaisesRegex(deploy.Blocked, "selected subscription"):
-            deploy.verify_web_iq(ctx)
+            self.verify(ctx)
         self.assertFalse(ctx.http.calls)
-
-    def test_invalid_header_characters_never_reach_http_or_error_output(self):
-        for key in ("private\nkey", "private key", "private\u0100key"):
-            ctx = self.web_context(key=key)
-            with self.assertRaisesRegex(deploy.Blocked, "invalid HTTP header characters") as stop:
-                deploy.verify_web_iq(ctx)
-            self.assertNotIn(key, str(stop.exception))
-            self.assertFalse(ctx.http.posts("search/web"))
-
-    def test_a_cited_live_probe_keeps_secrets_and_retrieved_content_out_of_receipts(self):
-        result = {"title": "Microsoft Web IQ", "url": "https://learn.microsoft.com/en-us/web-iq/",
-                  "content": "Grounding passage", "crawledAt": "2026-10-19T00:00:00Z"}
-        for dated in (True, False):
-            with self.subTest(dated=dated):
-                item = result if dated else {key: value for key, value in result.items() if key != "crawledAt"}
-                ctx = self.web_context(key="private-key", search=reply(body={"webResults": [item]}))
-                message = deploy.verify_web_iq(ctx)
-                self.assertIn("agent/app integration remain unverified", message)
-                receipt = ctx.state.section("web_iq")
-                self.assertEqual(receipt["status"], "search_verified")
-                self.assertEqual(receipt["dated_result_count"], int(dated))
-                post = [call for call in ctx.http.calls if call[0] == "POST"]
-                self.assertEqual(len(post), 1)
-                _, url, body, headers = post[0]
-                self.assertEqual(url, deploy.WEB_IQ_SEARCH)
-                self.assertEqual(headers, {"x-apikey": "private-key"})
-                self.assertEqual(body["query"], deploy.WEB_IQ_QUESTION)
-                self.assertEqual(body["contentFormat"], "passage")
-                self.assertEqual(body["safeSearch"], "strict")
-                for private in ("private-key", "Grounding passage"):
-                    self.assertNotIn(private, ctx.state.path.read_text(encoding="utf-8"))
-                    self.assertNotIn(private, " ".join(ctx.messages))
-
-    def test_errors_empty_results_and_missing_citations_are_not_search_success(self):
-        bad_results = ({}, {"webResults": []}, {"webResults": "bad"}, {"webResults": [None]},
-                       {"webResults": [{"title": "Title", "content": "Text", "url": "javascript:alert(1)"}]},
-                       {"webResults": [{"title": "Title", "url": "https://example.com"}]})
-        for response in (reply(401, {"message": "private-key"}), reply(403), reply(429), reply(500),
-                         *(reply(body=body) for body in bad_results)):
-            ctx = self.web_context(key="private-key", search=response)
-            ctx.state.section("web_iq").update(status="search_verified", verified_at="stale")
-            with self.assertRaises(deploy.Blocked) as stop:
-                deploy.verify_web_iq(ctx)
-            self.assertNotIn("private-key", str(stop.exception))
-            self.assertEqual(ctx.state.section("web_iq")["status"], "search_unverified")
-            self.assertNotIn("verified_at", ctx.state.section("web_iq"))
-            self.assertEqual(len(ctx.http.posts("search/web")), 1, "billable searches must not be retried")
 
 
 if __name__ == "__main__":

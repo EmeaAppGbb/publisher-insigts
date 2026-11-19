@@ -1,7 +1,7 @@
 {
   "type": "mcp",
   "server_label": "work_iq_mail",
-  "server_description": "Read the signed-in user's own Outlook mail through Work IQ, read-only: what the team has written about an asset, such as reported faults, planned work and dates. Call fetch once, with entityUrls holding exactly this one path for the asset's name: /me/messages?$search=\"<asset name>\"&$select=subject,from,receivedDateTime,webLink,body&$top=10 Never fetch another path, and never ask it to send, reply, schedule or change anything. For each message use its subject, its sender, the date its content states and its webLink. Date each fact by the date the content states, such as the day of an inspection, rather than the received time. Mail is what people reported or planned, never current status.",
+  "server_description": "Read the signed-in user's own Outlook mail through Work IQ, read-only: what colleagues, printers, retailers and agencies have written about a title, such as a printer's capacity, a retailer's order or a campaign plan. Call fetch once, with entityUrls holding exactly this one path for the title's name: /me/messages?$search=\"<title name>\"&$select=subject,from,receivedDateTime,webLink,body&$top=10 Never fetch another path, and never ask it to send, reply, schedule or change anything. For each message use its subject, its sender, the date its content states and its webLink. Date each fact by the date the content states, such as a confirmed press date, rather than the received time. Mail is what people reported, offered or planned, never current sales, stock or approvals.",
   "server_url": "{{work_iq_mail_mcp_endpoint}}",
   "project_connection_id": "{{work_iq_mail_connection}}",
   "allowed_tools": [

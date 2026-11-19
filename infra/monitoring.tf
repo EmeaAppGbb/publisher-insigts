@@ -68,7 +68,7 @@ resource "azurerm_role_assignment" "telemetry_publisher" {
 }
 
 # Foundry's traces hold prompts, answers, tool definitions and tool arguments and results: ontology rows, document and
-# public-context passages and, with Work IQ, mail content. Application Insights writes that content only to
+# Web IQ passages and, with Work IQ, mail content. Application Insights writes that content only to
 # AppGenAIContent. Protecting the table denies every standard read role, so only Privileged Monitoring Data Reader
 # holders, the deployer below, can read it. The rest of each trace stays readable to the workspace's readers.
 # protectionLevel exists from API version 2026-03-01; earlier versions accept the PATCH and ignore it.

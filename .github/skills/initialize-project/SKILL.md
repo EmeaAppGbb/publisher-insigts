@@ -32,16 +32,16 @@ python3 .github/skills/initialize-project/scripts/initialize_project.py \
 
 Repeat `--capacity-admin` for additional admins. Use `--dry-run` to validate without writing. The Python standard-library helper validates syntax, fills the sanitized example, and creates only `infra/terraform.tfvars`, with owner-only permissions. It refuses existing local tfvars/state and never overwrites a file. It does not verify cloud access, region availability or quota.
 
-Confirm the generated file is ignored with `git check-ignore infra/terraform.tfvars`; do not print its contents. Leave `fabric_git_enabled = false`, `work_iq_enabled = false`, `knowledge_lakehouse_id = null`, `knowledge_ontologies = {}` and `app_image_tag = null`: the runner writes the knowledge settings and the image tag, and Work IQ is an explicit opt-in with its own prerequisites. Native bootstrap needs no PAT; enable Fabric Git synchronization and request its PAT only after an explicit opt-in. Do not initialize a backend, run a plan/apply, connect Fabric Git, commit or push as a side effect of configuration.
+Confirm the generated file is ignored with `git check-ignore infra/terraform.tfvars`; do not print its contents. Leave `fabric_git_enabled = false`, `work_iq_enabled = false`, `knowledge_lakehouse_id = null`, `knowledge_ontologies = {}`, `app_image_tag = null` and `reprint_image_tag = null`: the runner writes the knowledge settings and the image tags, and Work IQ is an explicit opt-in with its own prerequisites. Native bootstrap needs no PAT; enable Fabric Git synchronization and request its PAT only after an explicit opt-in. Do not initialize a backend, run a plan/apply, connect Fabric Git, commit or push as a side effect of configuration.
 
 ## Preserve portable workspace identities
 
-Do **not** regenerate UUIDs or replace every occurrence of `Scenario`:
+Do **not** regenerate UUIDs or replace every occurrence of `Books`:
 
 - `.platform` logical IDs and deployment-plan references identify the same items across environments; keep them synchronized and stable.
-- TMDL lineage tags, `ScenarioLakehouse`, `site-asset-v1`, and the binder's sample logical ID form the sample binding contract.
-- `Scenario` / `ScenarioOntology` are workspace-local display names, not the template's project name. Keep the defaults unless the user requests a coordinated model rename; use the `fabric-workspace` skill for that change.
-- The template tables have no partitions or physical bindings. `SeedScenario` and `BindScenario` resolve the current workspace/lakehouse/ontology and SQL metadata **at runtime in Fabric**, without a saved default lakehouse attachment.
+- TMDL lineage tags, `BooksLakehouse`, `books-v1`, and the binder's ontology logical ID form the binding contract.
+- `Books` / `BooksOntology` are workspace-local display names, not the project name. Keep the defaults unless the user requests a coordinated model rename; use the `fabric-workspace` skill for that change.
+- The repository's tables have no partitions or physical bindings. `SeedBooks`, `ComputeBookSignals`, `BindBooks` and `PublishBooksKnowledge` resolve the current workspace/lakehouse/ontology and SQL metadata **at runtime in Fabric**, without a saved default lakehouse attachment.
 
 If a purported fresh template contains exported physical bindings or notebook attachments, stop and review their ownership using `docs/ontology-knowledge.md`. Do not delete unknown partitions or perform global GUID replacement. In a deployed derived repository, reviewed DEV binding exports are expected, and every promoted target must be rebound.
 

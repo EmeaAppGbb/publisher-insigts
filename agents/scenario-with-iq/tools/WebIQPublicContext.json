@@ -1,11 +1,11 @@
 {
   "type": "mcp",
   "server_label": "web_iq_public_context",
-  "server_description": "Search the public web through Web IQ for public, general context, such as a manufacturer's or an industry body's guidance about a type of equipment, for example recommended service intervals for industrial pumps. Call it once, last, and only for the part of a question that asks for general public context, with a query in public terms. Never put a site name, an asset name, a person's name or any other private or company detail in the query. Use at most one line from it, labelled \"Public context, not company guidance\", and cite the page's title, site and URL. Never use it for current status, company documents or mail. Read-only.",
+  "server_description": "Search the public web through Web IQ for general market context about a genre, a format or the book trade, such as readership trends in romantasy or seasonal demand for hardback fiction. Call it once, last, and only for the part of a question that asks for public or market context, with a query in public, general terms, contentFormat \"passage\", the only format the account allows, at most 3 results and maxLength 1500. Never put a title, an author, an imprint, a printer, a retailer, a person's name, a figure or any other company detail in the query: the portfolio is internal. Start what you use from it with the label \"Public context, not company data\", use at most one line of it beside company facts, cite each page's title, site and URL, and never present it as the reason for a title's results. Never use it for current figures, company documents or mail. Read-only.",
   "server_url": "{{public_context_mcp_endpoint}}",
   "project_connection_id": "{{public_context_connection}}",
   "allowed_tools": [
-    "knowledge_base_retrieve"
+    "web"
   ],
   "require_approval": "never"
 }

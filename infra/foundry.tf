@@ -181,13 +181,15 @@ resource "azapi_resource" "fabric_iq_connection" {
   }
 }
 
-# The agents' Web IQ tool: the public-context knowledge base, whose only source is Web IQ, read as the project
-# identity like the agents' knowledge base. Search calls Web IQ with the key it holds.
-resource "azapi_resource" "public_context_connection" {
+# The agents' Web IQ tool: Web IQ's MCP server, called directly and keyless as the project identity. Web IQ has no
+# Azure RBAC: it accepts the identity once an operator binds its application (client) ID, the web_iq output's client_id,
+# to the account's AppID in the Web IQ portal. Like the agents' knowledge base, it acts for every user, so only the
+# tool's description and the agent's instructions keep private terms out of its queries.
+resource "azapi_resource" "web_iq_connection" {
   count = var.knowledge_lakehouse_id == null ? 0 : 1
 
   type                      = "Microsoft.CognitiveServices/accounts/projects/connections@2025-10-01-preview"
-  name                      = "public-context"
+  name                      = "web-iq"
   parent_id                 = azapi_resource.foundry_project.id
   schema_validation_enabled = false
   locks                     = [azapi_resource.foundry.id]
@@ -196,14 +198,12 @@ resource "azapi_resource" "public_context_connection" {
     properties = {
       category      = "RemoteTool"
       authType      = "ProjectManagedIdentity"
-      target        = local.public_context_mcp_endpoint
-      audience      = "https://search.azure.com/"
+      target        = local.web_iq_mcp_endpoint
+      audience      = "https://api.microsoft.ai"
       isSharedToAll = false
       metadata      = { ApiType = "Azure" }
     }
   }
-
-  depends_on = [azurerm_role_assignment.project_search_reader]
 }
 
 # The agents' Work IQ mail tool, only with work_iq_enabled: Work IQ's MCP server, signed in as each user (OAuth

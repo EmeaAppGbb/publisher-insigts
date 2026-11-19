@@ -110,6 +110,20 @@ test('a question is an invoke_agent span inside its request, value-free, with ea
   assert.equal(SERVICE_NAME, 'scenario-assistant')
 })
 
+test('a decision on an approval request is labelled on its span, without the request it answers', async (t) => {
+  exporter.reset()
+  const { server, base } = await listen(async () => ({ status: 'answered', text: 'Nothing was submitted.', responseId: 'resp_9', toolCalls: [] }))
+  t.after(() => server.close())
+  await (await fetch(`${base}/api/turns`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer good.token.value', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cid, variant: 'with_iq', approval: { id: 'mcpr_68af3c2e', approve: false }, previousResponseId: 'resp_8' }),
+  })).text()
+  const agent = await finished('invoke_agent demo-with-iq')
+  assert.deepEqual([agent.attributes['app.decision'], agent.attributes['app.follow_up'], agent.attributes['app.outcome']], ['reject', true, 'answered'])
+  assert.ok(!JSON.stringify(exporter.getFinishedSpans().map((span) => [span.attributes, span.events])).includes('mcpr_'))
+})
+
 test('a failed question marks its span failed with the code only; a cancelled one does not', async (t) => {
   exporter.reset()
   const failure = await listen(async () => ({ status: 'failed', message: 'Foundry stopped the run: secret detail', code: 'timeout', toolCalls: [] }))

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "KQLDatabase",
+    "displayName": "BookSignals",
+    "description": "Approved reprint requests from the reprint server and each ComputeBookSignals run's title signals and decision options, for the fictional book portfolio."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "042d6a15-62ec-4c64-9989-e12f7fadf253"
+  }
+}

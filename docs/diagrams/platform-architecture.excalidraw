@@ -33,7 +33,7 @@
       "locked": true,
       "customData": {
         "title": "Fabric + Foundry IQ",
-        "description": "Intended derived-project architecture, not deployment evidence. GitHub and Copilot author the project; Terraform owns infrastructure. Fabric DEV holds a Scenario lakehouse and bound Site/Asset ontology, while TEST begins empty. OneLake files are indexed into Azure AI Search, whose Foundry IQ knowledge bases hold the documents and the public context that Web IQ supplies. Two Foundry prompt agents share one model and one set of instructions: the with-IQ agent reads documents and public context through Foundry IQ, live facts through native Fabric IQ as the signed-in user and, when Work IQ is enabled, the user's own mail as that user; the without-IQ agent has no tools. The deployment runner publishes the agents to the Foundry project by digest, and Terraform owns the web app's registry, environment, sign-in registration and container app. The Azure Container Apps web app calls only the two configured agents, with the user's own token. Foundry supplies the project and models. Deployment and runtime authorization are separate.",
+        "description": "Intended derived-project architecture, not deployment evidence. GitHub and Copilot author the project; Terraform owns infrastructure. Fabric DEV holds a Scenario lakehouse and bound Site/Asset ontology, while TEST begins empty. OneLake files are indexed into Azure AI Search, whose Foundry IQ knowledge base holds the documents. Two Foundry prompt agents share one model and one set of instructions: the with-IQ agent reads documents through Foundry IQ, public context directly from Web IQ, live facts through native Fabric IQ as the signed-in user and, when Work IQ is enabled, the user's own mail as that user; the without-IQ agent has no tools. The deployment runner publishes the agents to the Foundry project by digest, and Terraform owns the web app's registry, environment, sign-in registration and container app. The Azure Container Apps web app calls only the two configured agents, with the user's own token. Foundry supplies the project and models. Deployment and runtime authorization are separate.",
         "role": "page"
       },
       "index": "a0"
@@ -1959,15 +1959,7 @@
           "type": "arrow"
         },
         {
-          "id": "platform-architecture-public-web",
-          "type": "arrow"
-        },
-        {
           "id": "platform-architecture-documents",
-          "type": "arrow"
-        },
-        {
-          "id": "platform-architecture-public-context",
           "type": "arrow"
         }
       ],
@@ -2067,7 +2059,7 @@
       "type": "text",
       "x": 476,
       "y": 748,
-      "width": 239.1328125,
+      "width": 230.276,
       "height": 45,
       "angle": 0,
       "strokeColor": "#000000",
@@ -2083,7 +2075,7 @@
       "frameId": null,
       "roundness": null,
       "seed": 7317419,
-      "version": 3,
+      "version": 4,
       "versionNonce": 729057031,
       "isDeleted": false,
       "boundElements": [],
@@ -2092,8 +2084,8 @@
       "locked": false,
       "fontSize": 18,
       "fontFamily": 2,
-      "text": "Foundry IQ knowledge bases:\ndocuments, public context",
-      "originalText": "Foundry IQ knowledge bases:\ndocuments, public context",
+      "text": "Foundry IQ knowledge base:\ndocuments",
+      "originalText": "Foundry IQ knowledge base:\ndocuments",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
@@ -2330,7 +2322,7 @@
       "isDeleted": false,
       "boundElements": [
         {
-          "id": "platform-architecture-public-web",
+          "id": "platform-architecture-public-context",
           "type": "arrow"
         }
       ],
@@ -2455,8 +2447,8 @@
       "locked": false,
       "fontSize": 17,
       "fontFamily": 2,
-      "text": "Public web; key held in Search",
-      "originalText": "Public web; key held in Search",
+      "text": "Public web; project identity",
+      "originalText": "Public web; project identity",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
@@ -2468,100 +2460,6 @@
         "role": "text"
       },
       "index": "av"
-    },
-    {
-      "id": "platform-architecture-public-web",
-      "type": "arrow",
-      "x": 600,
-      "y": 872,
-      "width": 0,
-      "height": 38,
-      "angle": 0,
-      "strokeColor": "#B87503",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 2,
-      "strokeStyle": "solid",
-      "roughness": 0,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": null,
-      "seed": 1275892288,
-      "version": 1,
-      "versionNonce": 600768050,
-      "isDeleted": false,
-      "boundElements": [],
-      "updated": 1794830400000,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          0,
-          -38
-        ]
-      ],
-      "startArrowhead": null,
-      "endArrowhead": "triangle",
-      "startBinding": {
-        "elementId": "platform-architecture-web-iq",
-        "focus": 0,
-        "gap": 8
-      },
-      "endBinding": {
-        "elementId": "platform-architecture-knowledge",
-        "focus": 0,
-        "gap": 8
-      },
-      "elbowed": false,
-      "index": "aw",
-      "lastCommittedPoint": null
-    },
-    {
-      "id": "platform-architecture-public-web-label",
-      "type": "text",
-      "x": 616,
-      "y": 842,
-      "width": 80.32666015625,
-      "height": 21.25,
-      "angle": 0,
-      "strokeColor": "#000000",
-      "backgroundColor": "transparent",
-      "fillStyle": "solid",
-      "strokeWidth": 1.5,
-      "strokeStyle": "solid",
-      "roughness": 0,
-      "opacity": 100,
-      "groupIds": [],
-      "frameId": null,
-      "roundness": null,
-      "seed": 1209723665,
-      "version": 1,
-      "versionNonce": 1992143569,
-      "isDeleted": false,
-      "boundElements": [],
-      "updated": 1794830400000,
-      "link": null,
-      "locked": false,
-      "fontSize": 17,
-      "fontFamily": 2,
-      "text": "public web",
-      "originalText": "public web",
-      "textAlign": "left",
-      "verticalAlign": "top",
-      "containerId": null,
-      "lineHeight": 1.25,
-      "autoResize": true,
-      "customData": {
-        "maxWidth": 120,
-        "owner": null,
-        "role": "text"
-      },
-      "index": "ax"
     },
     {
       "id": "platform-architecture-app",
@@ -3366,9 +3264,9 @@
       "id": "platform-architecture-public-context",
       "type": "arrow",
       "x": 748,
-      "y": 766,
+      "y": 930.0,
       "width": 96,
-      "height": 0,
+      "height": 164.0,
       "angle": 0,
       "strokeColor": "#B87503",
       "backgroundColor": "transparent",
@@ -3381,7 +3279,7 @@
       "frameId": null,
       "roundness": null,
       "seed": 1136454549,
-      "version": 1,
+      "version": 2,
       "versionNonce": 1279462756,
       "isDeleted": false,
       "boundElements": [],
@@ -3394,15 +3292,23 @@
           0
         ],
         [
-          96,
+          28,
           0
+        ],
+        [
+          28,
+          -164.0
+        ],
+        [
+          96,
+          -164.0
         ]
       ],
       "startArrowhead": null,
       "endArrowhead": "triangle",
       "startBinding": {
-        "elementId": "platform-architecture-knowledge",
-        "focus": 0.21052631578947367,
+        "elementId": "platform-architecture-web-iq",
+        "focus": 0,
         "gap": 8
       },
       "endBinding": {

@@ -10,7 +10,7 @@ test("the server labels the app maps to IQs are exactly the with-IQ agent's MCP 
   const labels = readdirSync(directory).filter((name) => name.endsWith('.json'))
     .map((name) => (JSON.parse(readFileSync(new URL(name, directory), 'utf8')) as { server_label: string }).server_label)
   assert.deepEqual(labels.sort(), Object.keys(SERVER_IQ).sort())
-  assert.deepEqual(Object.values(SERVER_IQ).sort(), ['fabric', 'foundry', 'web', 'work'])
+  assert.deepEqual(Object.values(SERVER_IQ).sort(), ['action', 'fabric', 'foundry', 'web', 'work'])
 })
 
 test('a question is a lowercase UUID, a variant, 1 to 2000 characters and an optional response ID, nothing else', () => {
@@ -26,16 +26,39 @@ test('a question is a lowercase UUID, a variant, 1 to 2000 characters and an opt
   ]) assert.equal(parseTurnRequest(bad), undefined, JSON.stringify(bad))
 })
 
+test("a decision is an approval request's mcpr_ ID and true or false, for the with-IQ response that holds it, nothing else", () => {
+  const decision = { cid, variant: 'with_iq', approval: { id: 'mcpr_68af3c2e-9a_7c', approve: true }, previousResponseId: 'resp_1' }
+  assert.deepEqual(parseTurnRequest(decision), decision)
+  assert.deepEqual(parseTurnRequest({ ...decision, approval: { approve: false, id: 'mcpr_1' } }), { ...decision, approval: { id: 'mcpr_1', approve: false } })
+  for (const bad of [
+    { ...decision, previousResponseId: undefined }, { ...decision, previousResponseId: 'resp 1' }, { ...decision, variant: 'without_iq' },
+    { ...decision, question: 'Approve it.' }, { ...decision, question: '' }, { ...decision, arguments: { quantity: 99999 } },
+    { ...decision, approval: { id: 'mcpr_1', approve: true, arguments: { quantity: 99999 } } }, { ...decision, approval: { id: 'mcpr_1' } },
+    { ...decision, approval: { id: 'mcpr_1', approve: 'true' } }, { ...decision, approval: { id: 'mcpr_1', approve: 1 } },
+    { ...decision, approval: { id: 'resp_1', approve: true } }, { ...decision, approval: { id: 'mcpr_', approve: true } },
+    { ...decision, approval: { id: 'mcpr_1 x', approve: true } }, { ...decision, approval: { id: `mcpr_${'a'.repeat(201)}`, approve: true } },
+    { ...decision, approval: null }, { ...decision, approval: [] }, { ...decision, approval: true },
+  ]) assert.equal(parseTurnRequest(bad), undefined, JSON.stringify(bad))
+})
+
 test('stream events are checked before the browser trusts them', () => {
   const call = { id: 'mcp_1', server: 'work_iq_mail', tool: 'fetch', state: 'completed', ms: 900 }
   assert.deepEqual(parseTurnEvent(JSON.stringify({ type: 'tool', call })), { type: 'tool', call })
   assert.deepEqual(parseTurnEvent('{"type":"heartbeat"}'), { type: 'heartbeat' })
   const outcome = { status: 'answered', text: 'Two messages [W1].', responseId: 'resp_1', toolCalls: [call] }
   assert.deepEqual(parseTurnEvent(JSON.stringify({ type: 'result', outcome })), { type: 'result', outcome })
+  const approval = { id: 'mcpr_1', server: 'reprint_request', tool: 'submit_reprint_request', arguments: { territory: 'UK', quantity: 20000, expedited: true, note: null } }
+  const held = { status: 'needs-approval', approval, responseId: 'resp_1', toolCalls: [] }
+  assert.deepEqual(parseTurnEvent(JSON.stringify({ type: 'result', outcome: held })), { type: 'result', outcome: held })
   for (const bad of [
     'not json', '{"type":"tool","call":{"id":"x"}}', '{"type":"result","outcome":{"status":"answered","toolCalls":[]}}',
     '{"type":"result","outcome":{"status":"needs-consent","toolCalls":[]}}', '{"type":"unknown"}',
     JSON.stringify({ type: 'tool', call: { ...call, state: 'maybe' } }), JSON.stringify({ type: 'tool', call: { ...call, ms: -1 } }),
+    ...[
+      { ...held, responseId: undefined }, { ...held, responseId: 'resp/1' }, { ...held, approval: { ...approval, id: 'mcp_1' } },
+      { ...held, approval: { ...approval, tool: undefined } }, { ...held, approval: { ...approval, arguments: { territory: ['UK'] } } },
+      { ...held, approval: { ...approval, arguments: { territory: 'U\u202eK' } } }, { ...held, approval: { ...approval, arguments: '{"territory":"UK"}' } },
+    ].map((bad) => JSON.stringify({ type: 'result', outcome: bad })),
   ]) assert.throws(() => parseTurnEvent(bad), /unreadable|unrecognized/, bad)
 })
 

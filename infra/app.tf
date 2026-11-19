@@ -12,8 +12,8 @@ locals {
   foundry_api_client_id = "18a66f5f-dbdf-4c17-9dd7-1634712a9cbe"
   # deploy.py's agent phase publishes one prompt agent per variant from its reviewed definition directory.
   agents = {
-    with_iq    = { name = "${var.project_name}-with-iq", display_name = "Scenario assistant – with IQ", source = "agents/scenario-with-iq" }
-    without_iq = { name = "${var.project_name}-without-iq", display_name = "Scenario assistant – without IQ", source = "agents/scenario-without-iq" }
+    with_iq    = { name = "${var.project_name}-with-iq", display_name = "Book performance assistant – with IQ", source = "agents/scenario-with-iq" }
+    without_iq = { name = "${var.project_name}-without-iq", display_name = "Book performance assistant – without IQ", source = "agents/scenario-without-iq" }
   }
 }
 

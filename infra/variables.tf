@@ -201,9 +201,9 @@ variable "knowledge_base_name" {
 
   validation {
     condition = var.knowledge_base_name == null ? true : (
-      !contains(["${var.project_name}-ontology-check", "${var.project_name}-public-context"], var.knowledge_base_name)
+      var.knowledge_base_name != "${var.project_name}-ontology-check"
     )
-    error_message = "knowledge_base_name must differ from the ontology check-only and public-context knowledge bases."
+    error_message = "knowledge_base_name must differ from the ontology check-only knowledge base."
   }
 }
 
@@ -231,10 +231,10 @@ variable "knowledge_folders" {
     error_message = "Knowledge folder keys must be 2-32 lowercase letters, digits or single hyphens, starting with a letter and ending with a letter or digit."
   }
 
-  # Folder source names share Search's namespace with the <project_name>-web and <project_name>-<key>-ontology sources.
+  # Folder source names share Search's namespace with the <project_name>-<key>-ontology sources.
   validation {
-    condition     = alltrue([for name in keys(var.knowledge_folders) : name != "web" && !endswith(name, "-ontology")])
-    error_message = "Knowledge folder keys can't be web or end with -ontology: those source names belong to the Web IQ and ontology sources."
+    condition     = alltrue([for name in keys(var.knowledge_folders) : !endswith(name, "-ontology")])
+    error_message = "Knowledge folder keys can't end with -ontology: those source names belong to the ontology sources."
   }
 
   validation {
@@ -281,30 +281,6 @@ variable "web_iq_terms_accepted" {
   nullable    = false
 }
 
-variable "web_iq_api_key" {
-  description = "Web IQ API key for the public-context knowledge source. Never set it in tfvars: deploy.py passes WEB_IQ_API_KEY as TF_VAR_web_iq_api_key to every plan and apply after knowledge setup, never to teardown. A plan without it would remove the stored key. Write-only; Search masks it on read."
-  type        = string
-  default     = null
-  sensitive   = true
-  ephemeral   = true
-
-  validation {
-    condition     = var.web_iq_api_key == null || can(regex("^[!-~]+$", var.web_iq_api_key))
-    error_message = "web_iq_api_key must be a nonempty Web IQ portal key without spaces or control characters."
-  }
-}
-
-variable "web_iq_api_key_version" {
-  description = "Increment when rotating the write-only Web IQ API key, so the public-context source is updated with the new key."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.web_iq_api_key_version >= 1 && floor(var.web_iq_api_key_version) == var.web_iq_api_key_version
-    error_message = "web_iq_api_key_version must be a positive integer."
-  }
-}
-
 variable "work_iq_enabled" {
   description = "Opt in to Work IQ for the with-IQ agent's mail tool: a Work IQ public-client registration, Foundry's work-iq connection, through which the agent reads each user's mail as that user, and the agent's Work IQ tool. Prerequisites: a Microsoft 365 mailbox per user; a Copilot Credits spending policy covering the Work IQ API, which bills custom agents' Work IQ calls even for users with a Microsoft 365 Copilot licence; administrator consent to WorkIQAgent.Ask and offline_access; and each user's one-time consent, on their first Work IQ question."
   type        = bool
@@ -331,7 +307,7 @@ variable "search_identity_ready" {
 }
 
 variable "chat_model" {
-  description = "Supported Foundry IQ query-planning and answer-synthesis model, version, deployment SKU and quota units. Every Web IQ public-context call and verify's ontology check use it; the agents' knowledge base runs at minimal effort, which runs no model. A low capacity throttles them with HTTP 429."
+  description = "Supported Foundry IQ query-planning and answer-synthesis model, version, deployment SKU and quota units. Verify's ontology check uses it; the agents' knowledge base runs at minimal effort, which runs no model. A low capacity throttles them with HTTP 429."
   type = object({
     name     = optional(string, "gpt-5.4-mini")
     version  = optional(string, "2026-03-17")
@@ -472,5 +448,28 @@ variable "app_local_redirect_uris" {
   validation {
     condition     = alltrue([for uri in var.app_local_redirect_uris : can(regex("^http://localhost(:[0-9]{1,5})?/redirect\\.html$", uri))])
     error_message = "app_local_redirect_uris accepts only http://localhost[:port]/redirect.html, the app's MSAL redirect bridge; the deployed app's URL is always registered."
+  }
+}
+
+variable "reprint_image_tag" {
+  description = "Tag of the reprint request server image in the registry: a digest of the reviewed scenario/workflows/reprint-request files it was built from. Leave null: deploy.py's reprint phase builds the image with ACR Tasks, sets this tag and applies a reviewed plan that creates or updates the server's container app."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.reprint_image_tag == null ? true : can(regex("^[0-9a-f]{12}$", var.reprint_image_tag))
+    error_message = "reprint_image_tag must be null or the 12-character tag deploy.py builds."
+  }
+}
+
+variable "reprint_min_replicas" {
+  description = "Warm replicas of the reprint request server (0 or 1; it never runs more than one). 1 keeps an approved call from waiting for a cold start; 0 stops paying for idle time between sessions."
+  type        = number
+  default     = 1
+  nullable    = false
+
+  validation {
+    condition     = contains([0, 1], var.reprint_min_replicas)
+    error_message = "reprint_min_replicas must be 0 or 1."
   }
 }

@@ -12,27 +12,28 @@ Set `fabric_git_enabled = true` to opt into Fabric GitHub synchronization.
 
 ## What gets created
 
-- **Azure:** resource group, Fabric capacity, container registry, Log Analytics and Application Insights (Entra ID only, no ingestion key), and a Container Apps environment with the web app.
-- **Identity/access:** Entra deployment app/service principal, delegated scopes, authorized clients, the web app's single-page sign-in registration, the Work IQ registration only with Work IQ, managed identities and role assignments.
+- **Azure:** resource group, Fabric capacity, container registry, Log Analytics and Application Insights (Entra ID only, no ingestion key), and a Container Apps environment with the web app and the reprint request server.
+- **Identity/access:** Entra deployment app/service principal, delegated scopes, authorized clients, the web app's single-page sign-in registration, the reprint request server's API registration with its four approval roles and its connection's public OAuth client, the Work IQ registration only with Work IQ, managed identities and role assignments.
 - **Fabric:** DEV/TEST workspaces and DEV-to-TEST deployment pipeline; GitHub credentials connection only with Git synchronization enabled.
-- **DEV items:** `Scenario` lakehouse, `ScenarioOntology`, `SeedScenario`, `BindScenario` and `Bootstrap` deployment plan.
-- **Seed data:** `dbo.demo_sites` (2 rows), `dbo.demo_assets` (3 rows) and `Files/documents/starter.txt`.
-- **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, public-context, Fabric IQ, Application Insights and, only with Work IQ, Work IQ connections.
-- **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, a check-only knowledge base with the live ontology source, and the Web IQ public-context source and knowledge base.
-- **Web IQ:** global G3 account; portal AppID/key setup is manual.
-- **Prompt agents:** `<project>-with-iq`, with the Fabric IQ, Foundry IQ, Web IQ and, opt-in, Work IQ mail tools, and `<project>-without-iq`, with none, published by the deployment runner.
+- **DEV items:** `Books` lakehouse, `SeedBooks`, `ComputeBookSignals`, `BooksOntology`, `BindBooks`, `PublishBooksKnowledge`, the `BookEvents` Eventhouse with its `BookSignals` KQL database, and `Bootstrap` deployment plan.
+- **Seed data:** a fictional book portfolio: 8 titles, 18 editions, 26 weeks of sales, stock, public signals and campaigns, the latest week's signals and decision options computed from them, and `Files/documents/starter.txt` ([data contract](scenario/data/README.md)), with the six [approved documents](scenario/knowledge/README.md), such as the reprint and stock policy, published beside it.
+- **Foundry:** account, project, `agent`/`chat`/`embedding` model deployments, and Search, knowledge-base, keyless Web IQ, Fabric IQ, reprint request, Application Insights and, only with Work IQ, Work IQ connections.
+- **Search:** service, one indexed OneLake source per knowledge folder with its generated ingestion assets, the agents' knowledge base, and a check-only knowledge base with the live ontology source.
+- **Web IQ:** global G3 account, called keyless as the Foundry project identity; linking the AppID and binding that identity in the portal is manual.
+- **Prompt agents:** `<project>-with-iq`, with the Fabric IQ, Foundry IQ, Web IQ and, opt-in, Work IQ mail tools and the approval-gated reprint request tool, and `<project>-without-iq`, with none, published by the deployment runner.
 - **Web app:** the React page and its Node server in one container, at a public HTTPS URL.
+- **Reprint request server:** the agents' one action, an MCP server in its own container app. It records a reprint request that the signed-in user approved in the app, after checking their approval role and the week's governed option, in the `BookSignals` KQL database ([reprint request server](scenario/workflows/reprint-request/README.md)).
 - **Tracing:** one Application Insights operation per question, from the web app's server through the agent run to each tool call; Foundry's message content goes only to a protected table the deployer can read.
 
 ## What is where
 
 | Path | Contains |
 | --- | --- |
-| [`infra/`](infra/) | Terraform: Entra, Fabric, Foundry, Search, Web IQ, optional Work IQ, knowledge registration, the agents' connections and the app's hosting. |
-| [`workspace/`](workspace/) | Fabric items: lakehouse, seed and bind notebooks, ontology and bootstrap plan. |
+| [`infra/`](infra/) | Terraform: Entra, Fabric, Foundry, Search, Web IQ, optional Work IQ, knowledge registration, the agents' connections and the hosting of the app and the reprint request server. |
+| [`workspace/`](workspace/) | Fabric items: lakehouse, seed, signal, bind and document-publishing notebooks, ontology, Eventhouse and KQL database, and bootstrap plan. |
 | [`agents/`](agents/README.md) | The two Foundry prompt agent variants: shared `agent.json` and `instructions.md`, and the with-IQ variant's `tools/`. |
 | [`app/`](app/README.md) | The Container Apps web app: the React page, the Node server that verifies each user's token and asks the agents, and its image. |
-| `scenario/` | Added by your project: data contracts, documents, workflow rules and evaluations ([contract](docs/scenario-authoring.md)). |
+| [`scenario/`](scenario/data/README.md) | The book performance scenario: its data contract, [approved documents](scenario/knowledge/README.md), [evals](scenario/evals/README.md) and workflow code, such as the [reprint request server](scenario/workflows/reprint-request/README.md) ([contract](docs/scenario-authoring.md)). |
 | [`cicd/`](cicd/README.md) | Native Fabric bootstrap and promotion. |
 | [`docs/`](docs/getting-started.md) | Guides, starting with getting started. |
 | [`.github/skills/`](.github/skills/) | Copilot skills that run each workflow. |
@@ -44,7 +45,7 @@ Installation does not sign in, grant consent or enable optional runtime integrat
 **Before deployment:** complete the [manual preparation checklist](preparation.md)
 for permissions, tenant settings, licenses, sign-ins and approvals.
 [Web IQ runtime details](docs/runtime-integration.md#web-iq) cover the account,
-public-search probe and the agents' public-context tool.
+keyless route and the agents' public-context tool.
 
 ## Platform at a glance
 
@@ -56,6 +57,8 @@ The app reaches DEV through the [prompt agent route](docs/runtime-integration.md
 browser sign-in -> the Container App's server, which verifies the user's token ->
 a Foundry prompt agent -> the Fabric IQ ontology and, opt-in, Work IQ mail as the
 signed-in user, and the Foundry IQ documents and Web IQ public context as the project.
+Its one action, a reprint request, runs only after the user approves it in the app,
+and reaches the reprint request server as that user.
 
 Explore the focused views: [agent runtime and identity](docs/runtime-integration.md#runtime-at-a-glance),
 [indexed vs. live knowledge](docs/ontology-knowledge.md#two-retrieval-paths),
@@ -70,12 +73,12 @@ than redesigning the platform.
 
 1. Select **Use this template** to create your own repository; it can be private. Don't fork this repository for a project: forks of a public repository are public, and they inherit the template setting, so the deployment runner refuses to deploy from them.
 2. Open its **Codespace** for the prepared toolchain, or follow [developer setup](docs/development.md) for a local environment.
-3. Tell Copilot **"Deploy the platform"**. When using Copilot App with Codespaces, name the Codespace to keep deployment in that checkout and state. It finishes with both agents published and the web app running at its Container Apps URL. To deploy without Copilot, run the same [deterministic runner](docs/development.md#deploy-deterministically) yourself: `python3 .github/skills/deploy-platform/scripts/deploy.py up`. It stops to ask for any missing choice, such as the subscription.
+3. Tell Copilot **"Deploy the platform"**. When using Copilot App with Codespaces, name the Codespace to keep deployment in that checkout and state. It finishes with the reprint request server running, both agents published and the web app running at its Container Apps URL. To deploy without Copilot, run the same [deterministic runner](docs/development.md#deploy-deterministically) yourself: `python3 .github/skills/deploy-platform/scripts/deploy.py up`. It stops to ask for any missing choice, such as the subscription.
 
 Review [prerequisites and manual steps](docs/getting-started.md) before deploying. You choose the target, complete every sign-in once at the start and approve the plans. The runner assumes you are an administrator, grants consent as you, and names a specific grant only if an API refuses. For **configuration only**, use **/initialize-project**.
 
-Optional inputs, such as `work_iq_enabled`, `knowledge_folders`, `agent_model`
-and `app`, are listed under [configuration keys](docs/getting-started.md#configuration-keys).
+Optional inputs, such as `work_iq_enabled`, `knowledge_folders`, `agent_model`,
+`app` and `reprint_min_replicas`, are listed under [configuration keys](docs/getting-started.md#configuration-keys).
 
 Use one explicit region by default. `location` is also the Foundry and app region,
 so it must offer Foundry with the agent, chat and embedding models, Azure Container
@@ -105,25 +108,27 @@ python3 .github/skills/deploy-platform/scripts/deploy.py down --non-interactive 
 ```
 
 One reviewed Terraform destroy plan deletes every Terraform resource, including the
-container app, its registry and sign-in registration, the Foundry project with both
-agents, Application Insights and the Search ingestion assets; the runner then purges
-the Foundry account. **Both Fabric workspaces and all their contents are deleted.**
-`--yes` cannot approve teardown. Rerun `down` to resume.
+container app, its registry and sign-in registration, the reprint request server with
+its registrations, the Foundry project with both agents, Application Insights and the
+Search ingestion assets; the runner then purges the Foundry account. **Both Fabric
+workspaces and all their contents are deleted**, including the recorded reprint
+requests. `--yes` cannot approve teardown. Rerun `down` to resume.
 
 Remaining cleanup:
 
 - **Fabric tenant admin:** permanently delete the retained DEV/TEST workspaces; [retention still applies](https://learn.microsoft.com/en-us/fabric/admin/workspace-retention).
 - **Microsoft Entra:** deleted app registrations stay under **Deleted applications** for 30 days; restore or permanently delete them there.
-- **Web IQ portal:** revoke keys and remove the AppID/profile.
+- **Web IQ portal:** unbind the project identity and remove the AppID/profile.
 - **Preserved:** GitHub repository, local files/state, backend storage, tenant settings, licenses and external source data.
 
 [Teardown details](docs/development.md#delete-the-environment)
 
 ## Scope and boundaries
 
-- **Development baseline:** billable resources, authenticated public endpoints (including the web app), and preview ontology, deployment-plan, Foundry IQ, Fabric IQ tool and Web IQ features.
-- **Separate next steps:** TEST starts empty; [native promotion](cicd/README.md) is a separate workflow. PROD, production ingestion, the scenario workflow, granting other users access, and hardening such as private networking belong to your derived project.
-- **Runtime identity:** live ontology retrieval needs an end-user token; managed identity alone is insufficient. The with-IQ agent's Fabric IQ tool, and its optional Work IQ mail tool, run as the signed-in user; its Foundry IQ and Web IQ tools read their knowledge bases with the project's managed identity. See [runtime authentication](docs/ontology-knowledge.md#supply-the-end-users-identity-at-query-time) and the [access model](docs/runtime-integration.md#access-model).
+- **Development baseline:** billable resources, authenticated public endpoints (including the web app and the reprint request server), and preview ontology, deployment-plan, Foundry IQ, Fabric IQ tool and Web IQ features.
+- **Separate next steps:** TEST starts empty; [native promotion](cicd/README.md) is a separate workflow. PROD, production ingestion, further scenario workflows, granting other users access and approval roles, and hardening such as private networking belong to your derived project.
+- **Runtime identity:** live ontology retrieval needs an end-user token; managed identity alone is insufficient. The with-IQ agent's Fabric IQ tool, its reprint request tool and its optional Work IQ mail tool run as the signed-in user; its Foundry IQ tool reads the knowledge base, and its Web IQ tool calls Web IQ's MCP server through the keyless `web-iq` connection, both with the project's managed identity. See [runtime authentication](docs/ontology-knowledge.md#supply-the-end-users-identity-at-query-time) and the [access model](docs/runtime-integration.md#access-model).
+- **One approved action:** every agent tool is read-only except the reprint request, which the signed-in user approves or rejects in the app. The reprint request server checks their approval role against the decision authority matrix and records the request as its own identity; Terraform gives only the deployer an approval role. DEV can't take an approval back, so evals and readiness checks only ever reject ([reprint request](docs/runtime-integration.md#reprint-request)).
 - **Work IQ is opt-in:** `work_iq_enabled = false` by default. It needs a mailbox per user, a Copilot Credits spending policy that covers the Work IQ API, administrator consent and each user's one-time consent; see [Work IQ](docs/getting-started.md#work-iq). Without such a tenant it stays unverified.
 
 ## Contributing

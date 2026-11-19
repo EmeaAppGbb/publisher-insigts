@@ -59,11 +59,11 @@ jobs:
           '
       - name: Deployment runner and Foundry agent helper tests
         run: python -B -m unittest discover -s .github/skills/deploy-platform/tests
-      - name: Agent definitions (shared files byte-identical, tools read-only and allowlisted)
+      - name: Agent definitions (shared files byte-identical, tools allowlisted, only the reprint tool approval-gated)
         run: python -B .github/skills/deploy-platform/scripts/foundry_agent.py validate
-      - name: Runtime preflight tests
+      - name: Runtime preflight and eval runner tests
         run: python -B -m unittest discover -s .github/skills/runtime-integration/tests
-      - name: Fabric notebook tests (offline binder and seeder)
+      - name: Fabric notebook and eval expectation tests (offline)
         run: python -B -m unittest discover -s .github/skills/fabric-workspace/tests
 
   app:
@@ -122,6 +122,60 @@ jobs:
             | grep -i "^content-security-policy:.*frame-ancestors 'self'"
           docker rm --force app-ci
           if docker run --rm app:ci; then
+            echo "::error::The image started without its configuration."
+            exit 1
+          fi
+
+  reprint:
+    name: Reprint request server
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: scenario/workflows/reprint-request
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require public npm registry URLs in the lockfile
+        run: |
+          if grep -nE '"resolved": "https?://' package-lock.json | grep -v '"resolved": "https://registry.npmjs.org/'; then
+            echo "::error file=scenario/workflows/reprint-request/package-lock.json::Resolve packages from https://registry.npmjs.org/, not a private feed. See CONTRIBUTING.md."
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: scenario/workflows/reprint-request/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # The image deploy.py builds with ACR Tasks: build it, then prove it starts, refuses unsigned
+      # MCP requests and an incomplete configuration. Nothing is pushed, and no store is called.
+      - run: docker build --pull --tag reprint-request:ci .
+      - name: The image serves its health check and refuses MCP requests without a token
+        run: |
+          docker run --detach --name reprint-ci --publish 8080:8080 \
+            --env ENTRA_TENANT_ID=11111111-1111-4111-8111-111111111111 \
+            --env REPRINT_API_CLIENT_ID=22222222-2222-4222-8222-222222222222 \
+            --env REPRINT_OAUTH_CLIENT_ID=33333333-3333-4333-8333-333333333333 \
+            --env KQL_QUERY_URI=https://ci.z0.kusto.fabric.microsoft.com \
+            --env KQL_DATABASE=BookSignals \
+            --env AZURE_CLIENT_ID=44444444-4444-4444-8444-444444444444 reprint-request:ci
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --show-error http://localhost:8080/healthz && break
+            sleep 1
+          done
+          curl --fail --silent --show-error http://localhost:8080/healthz
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://localhost:8080/mcp)" = 401
+          curl --silent --show-error --dump-header - --output /dev/null -X POST http://localhost:8080/mcp \
+            | grep -i "^www-authenticate: Bearer"
+          # Stateless: no session stream to open.
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/mcp)" = 405
+          docker rm --force reprint-ci
+          if docker run --rm reprint-request:ci; then
             echo "::error::The image started without its configuration."
             exit 1
           fi

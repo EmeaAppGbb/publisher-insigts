@@ -1,0 +1,80 @@
+/// One format of a title, with its prices and, for print, its reprint terms.
+entity Edition
+	lineageTag: 2f33b1e0-42eb-4466-8063-5cf207e015ec
+	backingTable: editions
+	keyProperty: EditionId
+
+	/// Stable identifier of the edition.
+	property EditionId
+		dataType: string
+		lineageTag: e9ed8187-6d59-438f-95f2-9cbad3d6372c
+		backingConfiguration
+			valueColumn: editions.edition_id
+
+	property TitleId
+		dataType: string
+		lineageTag: 92191662-b005-482a-aa5e-7e9e21a6ce99
+		backingConfiguration
+			valueColumn: editions.title_id
+
+	/// Hardback, Paperback, Ebook or Audio.
+	property Format
+		dataType: string
+		lineageTag: 42655efc-9899-45d5-92c0-46b97cd6fdcf
+		backingConfiguration
+			valueColumn: editions.format
+
+	property ListPriceGbp
+		dataType: double
+		lineageTag: 6e15694e-97fb-46d4-85f5-b31312e14c8c
+		backingConfiguration
+			valueColumn: editions.list_price_gbp
+
+	/// Average net receipt per unit sold, in pounds.
+	property NetPriceGbp
+		dataType: double
+		lineageTag: d0db4f71-617a-4941-a24a-e095f488a4e5
+		backingConfiguration
+			valueColumn: editions.net_price_gbp
+
+	/// Print cost per unit; empty for digital editions.
+	property UnitCostGbp
+		dataType: double
+		lineageTag: 494209cf-6244-4fde-8dba-653b93117ae8
+		backingConfiguration
+			valueColumn: editions.unit_cost_gbp
+
+	property Printer
+		dataType: string
+		lineageTag: c5c518e7-c0fd-49e2-bd72-e6cffdcd8bef
+		backingConfiguration
+			valueColumn: editions.printer
+
+	/// Days from a standard reprint order to stock.
+	property ReprintLeadTimeDays
+		dataType: int64
+		lineageTag: 0de8022a-324a-4b84-9676-434853cc88d4
+		backingConfiguration
+			valueColumn: editions.reprint_lead_time_days
+
+	/// Days from an expedited reprint order to stock.
+	property ExpeditedLeadTimeDays
+		dataType: int64
+		lineageTag: 4ea4f073-c053-4f30-b9ba-dbf48c1062d1
+		backingConfiguration
+			valueColumn: editions.expedited_lead_time_days
+
+	/// Extra cost per unit of an expedited reprint.
+	property ExpeditePremiumGbp
+		dataType: double
+		lineageTag: f3ac6308-30e9-4283-a989-2abaad773404
+		backingConfiguration
+			valueColumn: editions.expedite_premium_gbp
+
+	property ReprintMinimumUnits
+		dataType: int64
+		lineageTag: 441fed98-0c88-4f42-a97c-266a4dda9d37
+		backingConfiguration
+			valueColumn: editions.reprint_minimum_units
+
+	annotation BootstrapBinding = books-v1

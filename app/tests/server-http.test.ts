@@ -6,11 +6,11 @@ import path from 'node:path'
 import test, { after } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { brotliCompressSync } from 'node:zlib'
-import { QUESTION_LIMIT, REDIRECT_PATH, type TurnOutcome } from '../src/live/protocol.ts'
+import { QUESTION_LIMIT, REDIRECT_PATH, type ToolCall, type TurnOutcome } from '../src/live/protocol.ts'
 import { createApp } from '../server/app.ts'
 import type { Verifier } from '../server/auth.ts'
 import type { ServerConfig } from '../server/config.ts'
-import type { AgentRun } from '../server/foundry.ts'
+import { askAgent, type AgentRun } from '../server/foundry.ts'
 import { CONTENT_SECURITY_POLICY, REDIRECT_CONTENT_SECURITY_POLICY } from '../server/http.ts'
 import { createStaticHandler } from '../server/static.ts'
 import type { ServerTurnLog } from '../server/turn.ts'
@@ -255,4 +255,62 @@ test("Foundry's consent request reaches the browser, and the browser leaving sto
   for (let attempt = 0; attempt < 50 && !stopped; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10))
   assert.equal(stopped, true)
   assert.ok(verified > 0)
+})
+
+// Foundry's stream, as askAgent reads it.
+function sse(...events: Record<string, unknown>[]): string {
+  return events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+}
+
+test("an approval request reaches the browser, and the user's decision continues it in Foundry, never with the browser's arguments", async (t) => {
+  const reprint = { edition_id: 'ed-001-hb', territory: 'UK', quantity: 20000, expedited: true, investment_gbp: 50000 }
+  const held = { type: 'mcp_approval_request', id: 'mcpr_68af3c2e9a7c', server_label: 'reprint_request', name: 'submit_reprint_request', arguments: JSON.stringify(reprint) }
+  const call = { id: 'mcp_7', type: 'mcp_call', server_label: 'reprint_request', name: 'submit_reprint_request', arguments: held.arguments, approval_request_id: held.id }
+  const answer = '**Request rr-20261102-title-001-inv-ed-001-hb-uk is approved.** [A1]'
+  const streams = [
+    sse({ type: 'response.output_item.done', item: held }, { type: 'response.completed', response: { id: 'resp_1', status: 'completed', output: [held] } }),
+    sse(
+      { type: 'response.output_item.added', item: call },
+      { type: 'response.output_item.done', item: { ...call, output: '{"status":"Approved"}' } },
+      { type: 'response.completed', response: { id: 'resp_2', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] } },
+    ),
+  ]
+  const sent: { token?: string; body: Record<string, unknown> }[] = []
+  const foundry = (async (_url: string | URL | Request, init?: RequestInit) => {
+    sent.push({ token: (init?.headers as Record<string, string>).Authorization, body: JSON.parse(String(init?.body)) as Record<string, unknown> })
+    return new Response(streams[sent.length - 1], { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+  }) as typeof fetch
+  const logs: ServerTurnLog[] = []
+  const ask = (run: AgentRun) => askAgent({ ...run, fetch: foundry })
+  const { server, base } = await listen(createApp({ config, verify, fallback: createStaticHandler(root), ask, log: (record) => logs.push(record) }))
+  t.after(() => server.close())
+
+  const asked = await events(await post(base, { cid, variant: 'with_iq', question: 'Submit the recommended reprint request for The Glass Orchard.' }))
+  assert.deepEqual(asked.at(-1), { type: 'result', outcome: {
+    status: 'needs-approval', approval: { id: held.id, server: 'reprint_request', tool: 'submit_reprint_request', arguments: reprint }, responseId: 'resp_1', toolCalls: [],
+  } })
+  const decision = { cid, variant: 'with_iq', approval: { id: held.id, approve: true }, previousResponseId: 'resp_1' }
+  for (const body of [
+    { ...decision, approval: { ...decision.approval, arguments: { ...reprint, quantity: 99999 } } }, { ...decision, arguments: reprint },
+    { ...decision, variant: 'without_iq' }, { ...decision, previousResponseId: undefined }, { ...decision, question: 'Approve it.' },
+  ]) {
+    const refused = await post(base, body)
+    assert.equal(refused.status, 400, JSON.stringify(body))
+    assert.match(((await refused.json()) as { message: string }).message, /approval: \{ id, approve \}/)
+  }
+  assert.equal(sent.length, 1, 'refused decisions never reach Foundry')
+
+  const decided = await events(await post(base, decision))
+  assert.deepEqual(sent[1], { token: 'Bearer good.token.value', body: {
+    agent_reference: { type: 'agent_reference', name: 'demo-with-iq' },
+    input: [{ type: 'mcp_approval_response', approval_request_id: held.id, approve: true }],
+    previous_response_id: 'resp_1', metadata: { cid, variant: 'with_iq' }, stream: true,
+  } })
+  assert.deepEqual(decided.filter((event) => event.type === 'tool').map((event) => (event.call as ToolCall).state), ['running', 'completed'])
+  const result = decided.at(-1) as { type: string; outcome: TurnOutcome }
+  assert.deepEqual([result.outcome.status, result.outcome.status === 'answered' && result.outcome.text, result.outcome.responseId], ['answered', answer, 'resp_2'])
+  assert.deepEqual(logs.map((record) => [record.followUp, record.decision, record.outcome, record.tools]),
+    [[false, undefined, 'needs-approval', []], [true, 'approve', 'answered', [{ iq: 'action', state: 'completed', ms: result.outcome.toolCalls[0].ms }]]])
+  const logged = JSON.stringify(logs)
+  for (const value of ['good.token', 'Glass Orchard', held.id, 'ed-001-hb', '20000']) assert.ok(!logged.includes(value), value)
 })

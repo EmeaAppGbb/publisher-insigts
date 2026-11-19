@@ -25,6 +25,6 @@ const server = createServer(createApp({
   contentSecurityPolicy: false,
 }))
 server.listen(config.port, () => {
-  console.info(`Scenario assistant (live) on http://localhost:${config.port}/`)
+  console.info(`Book performance assistant (live) on http://localhost:${config.port}/`)
   void verify.warmUp()
 })

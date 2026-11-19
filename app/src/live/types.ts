@@ -1,15 +1,16 @@
 // The interface between the UI (src/App.tsx, src/components) and the live agent layer (src/live). Both sides
 // compile against it.
-import type { ToolCall } from './protocol.ts'
+import type { ApprovalDecision, ApprovalRequest, ToolCall } from './protocol.ts'
 
-export type { ToolCall } from './protocol.ts'
+export type { ApprovalDecision, ApprovalRequest, ToolCall } from './protocol.ts'
 
 // The two Foundry agents the app asks: the same instructions, with the IQ tools and without any tool.
 export type Variant = 'with_iq' | 'without_iq'
-export type IqKey = 'fabric' | 'foundry' | 'web' | 'work'
+// The four IQs, and the with-IQ agent's one action, the reprint request: each a marker letter and a colour.
+export type IqKey = 'fabric' | 'foundry' | 'web' | 'work' | 'action'
 
 export interface Marker {
-  // As written in the reply: 'D1', 'F2', 'Web1', 'W1'.
+  // As written in the reply: 'D1', 'F2', 'Web1', 'W1', 'A1'.
   id: string
   kind: IqKey
   // '2' for [F1 §2].
@@ -31,7 +32,7 @@ export interface ParsedReply {
   steps: string[]
   // Unique, in order of first appearance in the answer.
   markers: Marker[]
-  // The IQs cited in the answer or its sources, always ordered fabric, foundry, work, web.
+  // The IQs cited in the answer or its sources, always ordered fabric, foundry, work, web, then the action.
   usedIqs: IqKey[]
 }
 
@@ -39,19 +40,20 @@ export interface Identity {
   name: string
 }
 
-export interface Question {
-  variant: Variant
-  text: string
-  // Foundry's ID of the answer this question follows up.
-  previousResponseId?: string
-}
+export type Question =
+  // previousResponseId is Foundry's ID of the answer this question follows up.
+  | { variant: Variant; text: string; previousResponseId?: string; approval?: undefined }
+  // The user's decision on the approval request that the with-IQ agent's previous response waits for.
+  | { variant: 'with_iq'; approval: ApprovalDecision; previousResponseId: string; text?: undefined }
 
 // responseId is Foundry's ID for the agent run, which its traces show and a follow-up continues; toolCalls are the
-// MCP calls Foundry reported. needs-consent carries the link a tool's server asked the user to open first. code is
-// 'unauthorized' when the app server refused the sign-in, 'timeout' or 'cancelled' when the turn stopped.
+// MCP calls Foundry reported. needs-consent carries the link a tool's server asked the user to open first;
+// needs-approval the tool call the run waits for the user to approve or reject. code is 'unauthorized' when the app
+// server refused the sign-in, 'timeout' or 'cancelled' when the turn stopped.
 export type TurnResult =
   | { status: 'answered'; reply: ParsedReply; raw: string; elapsedMs: number; responseId?: string; toolCalls: ToolCall[] }
   | { status: 'needs-consent'; consentUrl: string; server?: string; elapsedMs: number; responseId?: string; toolCalls: ToolCall[] }
+  | { status: 'needs-approval'; approval: ApprovalRequest; elapsedMs: number; responseId: string; toolCalls: ToolCall[] }
   | { status: 'failed'; message: string; code?: string; elapsedMs: number; responseId?: string; toolCalls: ToolCall[] }
 
 export interface AgentClient {

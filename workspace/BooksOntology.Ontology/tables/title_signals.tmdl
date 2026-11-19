@@ -1,0 +1,118 @@
+table title_signals
+	lineageTag: 6acc1fe5-8de5-4791-8a61-565351a4bbf7
+
+	column signal_id
+		dataType: string
+		sourceColumn: signal_id
+
+	column title_id
+		dataType: string
+		sourceColumn: title_id
+
+	column title_name
+		dataType: string
+		sourceColumn: title_name
+
+	column author_name
+		dataType: string
+		sourceColumn: author_name
+
+	column signal_type
+		dataType: string
+		sourceColumn: signal_type
+
+	column edition_id
+		dataType: string
+		sourceColumn: edition_id
+
+	column format
+		dataType: string
+		sourceColumn: format
+
+	column territory
+		dataType: string
+		sourceColumn: territory
+
+	column as_of_week
+		dataType: dateTime
+		sourceColumn: as_of_week
+
+	column first_detected_week
+		dataType: dateTime
+		sourceColumn: first_detected_week
+
+	column material_since_week
+		dataType: dateTime
+		sourceColumn: material_since_week
+
+	column headline
+		dataType: string
+		sourceColumn: headline
+
+	column actual_vs_forecast
+		dataType: double
+		sourceColumn: actual_vs_forecast
+
+	column units_last_4w
+		dataType: int64
+		sourceColumn: units_last_4w
+
+	column forecast_last_4w
+		dataType: int64
+		sourceColumn: forecast_last_4w
+
+	column stock_on_hand
+		dataType: int64
+		sourceColumn: stock_on_hand
+
+	column stock_on_order
+		dataType: int64
+		sourceColumn: stock_on_order
+
+	column stock_cover_days
+		dataType: double
+		sourceColumn: stock_cover_days
+
+	column reprint_lead_time_days
+		dataType: int64
+		sourceColumn: reprint_lead_time_days
+
+	column opportunity_at_risk_gbp
+		dataType: int64
+		sourceColumn: opportunity_at_risk_gbp
+
+	column excess_exposure_gbp
+		dataType: int64
+		sourceColumn: excess_exposure_gbp
+
+	column driver_territory
+		dataType: string
+		sourceColumn: driver_territory
+
+	column driver_channels
+		dataType: string
+		sourceColumn: driver_channels
+
+	column search_momentum_change_pct
+		dataType: double
+		sourceColumn: search_momentum_change_pct
+
+	column media_mentions_4w
+		dataType: int64
+		sourceColumn: media_mentions_4w
+
+	column confidence
+		dataType: string
+		sourceColumn: confidence
+
+	column is_material
+		dataType: string
+		sourceColumn: is_material
+
+	column status
+		dataType: string
+		sourceColumn: status
+
+	column recommended_option
+		dataType: string
+		sourceColumn: recommended_option

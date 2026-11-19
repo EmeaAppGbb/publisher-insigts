@@ -13,24 +13,28 @@ import foundry_agent as foundry  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 VALUES = {
-    "agent_display_name": "Scenario assistant – with IQ", "agent_model_deployment": "agent",
+    "agent_display_name": "Book performance assistant – with IQ", "agent_model_deployment": "agent",
     "agent_reasoning_effort": "low",
     "knowledge_base_mcp_endpoint": "https://srch.search.windows.net/knowledgebases/demo-knowledge/mcp?api-version=v1",
     "knowledge_base_connection": "knowledge-base",
-    "public_context_mcp_endpoint": "https://srch.search.windows.net/knowledgebases/demo-public-context/mcp?api-version=v1",
-    "public_context_connection": "public-context",
+    "public_context_mcp_endpoint": "https://api.microsoft.ai/v3/mcp",
+    "public_context_connection": "web-iq",
     "fabric_iq_mcp_endpoint": "https://api.fabric.microsoft.com/v1/mcp/dataPlane/workspaces/w/items/o/ontologyEndpoint",
     "fabric_iq_connection": "fabric-iq-scenario",
     "work_iq_mail_mcp_endpoint": "https://workiq.svc.cloud.microsoft/mcp",
     "work_iq_mail_connection": "work-iq",
+    "reprint_request_mcp_endpoint": "https://ca-demo-mcp.example.azurecontainerapps.io/mcp",
+    "reprint_request_connection": "reprint-request",
 }
 WITHOUT_MAIL = {key: value for key, value in VALUES.items() if not key.startswith("work_iq_mail_")}
 WITH_IQ = REPO / foundry.VARIANTS["with_iq"]
 # Any source marker, such as [D1], [F1 §2] or [Web1].
 MARKER = re.compile(r"\[([A-Za-z]+)\d+(?:\s*§\s*[\w.-]+)?\]")
 # The sample's facts reach an agent only through its tools: the without-IQ variant shares the instructions.
-SAMPLE_FACTS = ("Pump", "Conveyor", "North Works", "South Works", "demo-site", "demo-asset", "Operational",
-                "Maintenance", "starter.txt")
+# Policy values stay in the approved documents, which only the with-IQ agent retrieves.
+SAMPLE_FACTS = ("The Glass Orchard", "Northbound Signals", "Salt and Starlight", "Mara Ellison", "Harrowgate Lane",
+                "Brindle Print Works", "Calder Valley", "title-00", "ed-00", "sig-20", "bks-", "starter.txt",
+                "£100,000", "£150,000", "28 days", "120 days", "Publishing director", "Head of production planning")
 
 
 class FoundryAgentTests(unittest.TestCase):
@@ -50,7 +54,7 @@ class FoundryAgentTests(unittest.TestCase):
             self.assertEqual((definition["kind"], definition["model"], definition["reasoning"]),
                              ("prompt", "agent", {"effort": "low"}))
             self.assertEqual(definition["instructions"], (REPO / source / "instructions.md").read_text(encoding="utf-8"))
-            self.assertEqual(body["description"], "Scenario assistant – with IQ")
+            self.assertEqual(body["description"], "Book performance assistant – with IQ")
             self.assertEqual(body["metadata"], {foundry.DIGEST_KEY: foundry.digest(body), "source": source.split("/")[1],
                                                 "variant": variant})
             # Tools authenticate through their connections: no headers and no per-request inputs.
@@ -61,19 +65,22 @@ class FoundryAgentTests(unittest.TestCase):
             tools[variant] = {tool["server_label"]: (tool["allowed_tools"], tool["project_connection_id"])
                               for tool in definition["tools"]}
             for tool in definition["tools"]:
-                self.assertEqual((tool["type"], tool["require_approval"]), ("mcp", "never"))
+                # Only the reprint request tool acts, and Foundry asks the user to approve each call first.
+                approval = "always" if tool["server_label"] == "reprint_request" else "never"
+                self.assertEqual((tool["type"], tool["require_approval"]), ("mcp", approval))
                 self.assertLessEqual(len(tool["server_description"]), 1024)
         self.assertEqual(tools["with_iq"], {
             "fabric_iq_ontology": (["ask_ontology"], "fabric-iq-scenario"),
             "foundry_iq_knowledge": (["knowledge_base_retrieve"], "knowledge-base"),
-            "web_iq_public_context": (["knowledge_base_retrieve"], "public-context"),
-            "work_iq_mail": (["fetch"], "work-iq")})
+            "web_iq_public_context": (["web"], "web-iq"),
+            "work_iq_mail": (["fetch"], "work-iq"),
+            "reprint_request": (["submit_reprint_request"], "reprint-request")})
         self.assertEqual(tools["without_iq"], {})
 
     def test_the_mail_tool_reads_one_search_of_the_users_mail(self):
         # Work IQ's server also offers tools that act: the tool allows only fetch, of one fixed search.
         mail = json.loads((WITH_IQ / "tools" / "WorkIQMail.json").read_text(encoding="utf-8"))
-        self.assertIn('exactly this one path for the asset\'s name: /me/messages?$search="<asset name>"'
+        self.assertIn('exactly this one path for the title\'s name: /me/messages?$search="<title name>"'
                       "&$select=subject,from,receivedDateTime,webLink,body&$top=10 ", mail["server_description"])
         self.assertIn("never ask it to send, reply, schedule or change anything", mail["server_description"])
 
@@ -109,6 +116,55 @@ class FoundryAgentTests(unittest.TestCase):
         for message, (source, omit) in cases.items():
             with self.subTest(message), self.assertRaisesRegex(foundry.DefinitionError, message):
                 foundry.render(source, VALUES, "with_iq", omit=omit)
+
+    def test_only_the_reprint_request_tool_asks_for_approval_and_only_for_its_one_tool(self):
+        cases = {
+            "require_approval must be always": {"require_approval": "never"},
+            "must be server_label reprint_request with its own endpoint and connection, allowing exactly "
+            "submit_reprint_request": {"allowed_tools": ["submit_reprint_request", "cancel_reprint_request"]},
+            "must be server_label reprint_request": {"server_label": "production_planning"},
+            "with its own endpoint and connection": {"server_url": "{{work_iq_mail_mcp_endpoint}}"},
+        }
+        for message, change in cases.items():
+            with self.subTest(message):
+                root = self.copy()
+                path = root / foundry.VARIANTS["with_iq"] / "tools" / "ReprintRequest.json"
+                path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **change}), encoding="utf-8")
+                with self.assertRaisesRegex(foundry.DefinitionError, message):
+                    foundry.load(path.parent.parent)
+
+    def test_no_other_tool_reaches_the_reprint_server_without_the_approval_step(self):
+        # The rule follows the server: the same server under another file name is refused, whatever it asks for, as is
+        # a tool that borrows only its label, its endpoint or its connection.
+        reprint = json.loads((WITH_IQ / "tools" / "ReprintRequest.json").read_text(encoding="utf-8"))
+        mail = json.loads((WITH_IQ / "tools" / "WorkIQMail.json").read_text(encoding="utf-8"))
+        cases = {
+            "renamed": {**reprint, "require_approval": "never"},
+            "renamed, still asking": reprint,
+            "label": {**mail, "server_label": "reprint_request"},
+            "endpoint": {**mail, "server_url": "{{reprint_request_mcp_endpoint}}"},
+            "connection": {**mail, "project_connection_id": "{{reprint_request_connection}}"},
+        }
+        for name, tool in cases.items():
+            with self.subTest(name):
+                root = self.copy()
+                tools = root / foundry.VARIANTS["with_iq"] / "tools"
+                (tools / "ReprintRequest.json").unlink()
+                (tools / "Production.json").write_text(json.dumps(tool), encoding="utf-8")
+                with self.assertRaisesRegex(foundry.DefinitionError,
+                                            "only ReprintRequest.json may call the reprint_request server"):
+                    foundry.load(tools.parent)
+
+    def test_a_tool_names_its_server_and_connection_only_through_placeholders(self):
+        for key, value in (("server_url", "https://ca-demo-mcp.example.azurecontainerapps.io/mcp"),
+                           ("project_connection_id", "reprint-request"),
+                           ("server_url", "{{work_iq_mail_mcp_endpoint}}/v2")):
+            with self.subTest(key=key, value=value):
+                root = self.copy()
+                path = root / foundry.VARIANTS["with_iq"] / "tools" / "WorkIQMail.json"
+                path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), key: value}), encoding="utf-8")
+                with self.assertRaisesRegex(foundry.DefinitionError, f"{key} must be exactly one placeholder"):
+                    foundry.load(path.parent.parent)
 
     def test_a_model_without_reasoning_takes_no_reasoning_setting(self):
         body = foundry.render(REPO / foundry.VARIANTS["without_iq"], {**VALUES, "agent_reasoning_effort": None},
@@ -171,7 +227,7 @@ class FoundryAgentTests(unittest.TestCase):
     def test_the_shared_files_must_stay_byte_identical(self):
         root = self.copy()
         self.assertEqual(foundry.validate(root), {
-            "with_iq": ["FabricIQOntology", "FoundryIQKnowledge", "WebIQPublicContext", "WorkIQMail"],
+            "with_iq": ["FabricIQOntology", "FoundryIQKnowledge", "ReprintRequest", "WebIQPublicContext", "WorkIQMail"],
             "without_iq": []})
         path = root / foundry.VARIANTS["without_iq"] / "instructions.md"
         path.write_text(path.read_text(encoding="utf-8") + "\nOne more rule.\n", encoding="utf-8")
@@ -183,10 +239,11 @@ class FoundryAgentTests(unittest.TestCase):
         # Short enough to review in one read, and without braces, which some renderers read as variables.
         self.assertLessEqual(len(text.strip()), 8000)
         self.assertNotRegex(text, r"[{}]")
-        self.assertEqual({match.group(1) for match in MARKER.finditer(text)}, {"D", "F", "Web", "W"})
-        for line in ("- [D1] ScenarioOntology · <entity> · <key>", "- [F1] <document title> · <section>",
+        self.assertEqual({match.group(1) for match in MARKER.finditer(text)}, {"D", "F", "Web", "W", "A"})
+        for line in ("- [D1] BooksOntology · <entity> · <key>", "- [F1] <document title> · <section>",
                      "- [Web1] <page title> · <site> · <URL>",
-                     "- [W1] Outlook · <sender> · <date> · <subject> · <link>"):
+                     "- [W1] Outlook · <sender> · <date> · <subject> · <link>",
+                     "- [A1] Reprint request · <request ID> · <status> · <approver> (<approver role>) · <approved at>"):
             self.assertIn(f"\n{line}\n", text)
         self.assertLess(text.index('A line "Sources"'), text.index('A line "Steps"'))
         # Foundry's runtime otherwise cites knowledge-base results in its own format.
