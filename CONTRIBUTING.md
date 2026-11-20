@@ -58,7 +58,7 @@ Report security issues as described in [SECURITY.md](SECURITY.md), never in a pu
 5. CI starts once a maintainer approves workflows for first-time contributors. Fix any failures.
    A static check doesn't prove cloud permissions, preview availability, quota or ingestion, so
    say what you couldn't verify.
-6. A [code owner](.github/CODEOWNERS) reviews changes to agent guidance, skills, CI, the dev
+6. A maintainer reviews changes to agent guidance, skills, CI, the dev
    container, infrastructure, Fabric items, the agent definitions and dependencies. Maintainers
    squash-merge approved pull requests.
 
