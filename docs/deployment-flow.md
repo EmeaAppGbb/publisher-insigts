@@ -40,7 +40,7 @@ The [`Bootstrap` deployment plan](../workspace/Bootstrap.DeploymentPlan/plan.yml
 7. Deploy and execute `BindBooks` to refresh scoped SQL metadata, bind to the target lakehouse through its SQL analytics endpoint, and expose the physical IDs needed for knowledge setup.
 8. Deploy and execute `PublishBooksKnowledge` after the lakehouse, independently of steps 2-7, to write the [approved documents](../scenario/knowledge/README.md) beside `starter.txt` without overwriting any file.
 
-The plan itself is also a selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing seeded rows, recorded requests and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) shows the template's original four groups and the promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
+The plan itself is also a selected Git item. **A Git push does not run the plan**; attach it to each operation that needs its actions. Existing seeded rows, recorded requests and files are preserved. The [Fabric lifecycle diagram](diagrams/fabric-lifecycle.svg) shows the plan's eight groups, their dependencies and the promotion boundaries. For API request shapes, failure handling and target rebinding, use the [native bootstrap and promotion guide](../cicd/README.md).
 
 ## Where this flow stops
 

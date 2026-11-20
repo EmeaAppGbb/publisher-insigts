@@ -1,6 +1,6 @@
 # Getting started
 
-Use this template for a **new project**, not an existing deployment. Each derived repository gets its own resources and Terraform state. Create it with **Use this template**, not a fork: forks of this public repository are public and inherit the template setting, so the deployment runner refuses to deploy from them. You use the template at your own risk; read the [disclaimer](../README.md#disclaimer) first.
+This guide deploys Book Intelligence to a **new environment** from this repository, which was created from the [Fabric + Foundry IQ template](https://github.com/microsoftgbb/iq-template). Each environment gets its own resources and Terraform state, kept in the checkout that deploys it: use a fresh checkout for each environment, and never copy another environment's tfvars or state. You deploy at your own risk; read the [disclaimer](../README.md#disclaimer) first.
 
 The default Fabric bootstrap imports definitions through native APIs and needs
 **no GitHub PAT**. Fabric GitHub synchronization is opt-in.
@@ -13,7 +13,7 @@ preparation checklist](../preparation.md) lists the same items as tasks.
 
 For a visual overview, see the [platform architecture](architecture.md) and [deployment flow](deployment-flow.md). The prepared toolchain includes the [official Microsoft IQ Copilot packages](copilot-tooling.md); their MCP authentication and runtime connections remain separate from image installation.
 
-**Guided App/CLI path:** open the derived repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document and live ontology retrieval and the keyless Web IQ wiring, then deploys the reprint request server, publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
+**Guided App/CLI path:** open this repository's Codespace and tell Copilot **"Deploy the platform"**. The [deployment skill](../.github/skills/deploy-platform/SKILL.md) carries out all stages below: it completes every sign-in first, asks for missing choices and approvals, verifies document and live ontology retrieval and the keyless Web IQ wiring, then deploys the reprint request server, publishes the two Foundry prompt agents and deploys their web app. For App, direct it to that same Codespace through GitHub CLI SSH. See [single-prompt setup, credentials and state retention](development.md#deploy-from-one-prompt).
 
 **Deterministic path:** the skill drives the same [runner](development.md#deploy-deterministically) that you can run yourself, with the same gates and no AI agent: `python3 .github/skills/deploy-platform/scripts/deploy.py up`. The steps below remain the canonical manual flow and the runner's contract.
 
@@ -38,8 +38,8 @@ longest lead times; they are typical, not guaranteed.
 | Web IQ | You; your Microsoft representative | Days or more: enablement is a request | The paid subscription is enabled for Web IQ; Azure credits do not pay for it. You accept its terms before deployment, link the resource after the platform step and bind the Foundry project identity to its AppID after knowledge setup ([Web IQ](#web-iq)). |
 | Region and quota | You; a subscription owner for quota requests | Days, if quota must be raised | One region that offers [Fabric](https://learn.microsoft.com/fabric/admin/region-availability), [Search agentic retrieval](https://learn.microsoft.com/azure/search/search-region-support), the [serverless Search tier](https://learn.microsoft.com/azure/search/search-sku-tier#serverless-pricing-model-preview) (or set `search_sku` to a dedicated tier such as `basic`), Foundry with the models in [`variables.tf`](../infra/variables.tf), Azure Container Apps and Container Registry. Quota: [Fabric CUs](https://learn.microsoft.com/fabric/enterprise/fabric-quotas) for the SKU (F2 by default); `gpt-5.4-mini` GlobalStandard for the `agent` (100 units) and `chat` (10) deployments, summed because they share one quota; and `text-embedding-3-small` (10). |
 | Work IQ (optional) | Global administrator; billing administrator; Microsoft 365 administrator | Days: billing and mailboxes | Only with `work_iq_enabled = true`: the tenant's Work IQ service principal, a Copilot Credits spending policy that covers the Work IQ API and every user, a mailbox per user, and consent ([Work IQ](#work-iq)). |
-| Fabric Git synchronization (optional) | You; your GitHub organization owner | Hours, for PAT approval or SSO | Only with `fabric_git_enabled = true`: a fine-grained PAT for the **new repository** with **Contents: Read and write**, plus Git/GitHub tenant settings, workspace Admin and any applicable cross-geography export setting. |
-| Deployment host | You | Minutes | The derived repository's Codespace or dev container ([developer setup](development.md)). |
+| Fabric Git synchronization (optional) | You; your GitHub organization owner | Hours, for PAT approval or SSO | Only with `fabric_git_enabled = true`: a fine-grained PAT for **this repository** with **Contents: Read and write**, plus Git/GitHub tenant settings, workspace Admin and any applicable cross-geography export setting. |
+| Deployment host | You | Minutes | This repository's Codespace or dev container ([developer setup](development.md)), one checkout per environment. |
 | Other app users | An operator | When you share the app | A Foundry role on the project and read access to the DEV ontology and its data, granted per user; to approve reprint requests, an approval role on the reprint API; with Work IQ, a mailbox and spending-policy coverage ([access model](runtime-integration.md#access-model)). |
 
 The dev container includes every tool. Locally, install Git 2.27+, Bash,
@@ -90,17 +90,17 @@ For `2`, read the message and the receipts in `.artifacts/deploy/state.json`, fi
 the cause and rerun. [Deploy deterministically](development.md#deploy-deterministically)
 lists every phase, approval and flag.
 
-## 1. Create your repository
+## 1. Open the repository
 
-On GitHub, select **Use this template > Create a new repository**, then open **that repository** in Codespaces or clone it locally. Keep every item folder under `workspace/`, including the `.platform` logical IDs: these are portable identities, not someone else's deployment bindings. The notebooks resolve physical bindings in each target workspace. Select your new repository's published bootstrap branch and `/workspace` directory; do not select an unpublished Copilot worktree branch. Push any customization to the selected branch before synchronizing Fabric. Replace the template's code owners and contribution, conduct, security and support policies with your own, and keep its MIT license notice ([what gets templated](development.md#what-gets-templated)).
+Open this repository in Codespaces for the prepared toolchain, or clone it locally ([developer setup](development.md)). Deploy each environment from its own checkout: its tfvars, Terraform state and deployment receipts stay there. Keep every item folder under `workspace/`, including the `.platform` logical IDs: these are portable identities, not another environment's deployment bindings. The notebooks resolve physical bindings in each target workspace. Deploy from the repository's published branch, normally `main`, and its `/workspace` directory; do not select an unpublished Copilot worktree branch. Push any customization to that branch before synchronizing Fabric.
 
 ## 2. Configure
 
-**With Copilot App/CLI:** from the repository root, ask it to **use /initialize-project**. The skill confirms your project, region and Fabric admin, resolves the new GitHub repository and published branch, then creates only the ignored `infra/terraform.tfvars`. It does not sign in or deploy, and refuses existing local configuration/state.
+**With Copilot App/CLI:** from the repository root, ask it to **use /initialize-project**. The skill confirms your project, region and Fabric admin, resolves this GitHub repository and its published branch, then creates only the ignored `infra/terraform.tfvars`. It does not sign in or deploy, and refuses existing local configuration/state.
 
 **With the runner:** on first use, `python3 .github/skills/deploy-platform/scripts/deploy.py up --through config --local-state --project-name "<project-name>" --location "<azure-region>" --capacity-admin "<user-principal-name>"` calls the same initializer with this checkout's `origin` and the repository's published default branch (or `--github-branch`).
 
-**Manually:** copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` without overwriting an existing file. Edit its **six placeholders**: `project_name`, `location`, `fabric_capacity_admins`, `github_owner`, `github_repository_name`, and `github_branch_name`. Use your new repository's details and a distinct, short project name. The capacity admin is your Fabric identity's user UPN or service-principal **object ID**. The initializer also works [directly without Copilot](development.md#what-gets-templated).
+**Manually:** copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` without overwriting an existing file. Edit its **six placeholders**: `project_name`, `location`, `fabric_capacity_admins`, `github_owner`, `github_repository_name`, and `github_branch_name`. Use this repository's details and a distinct, short project name. The capacity admin is your Fabric identity's user UPN or service-principal **object ID**. The initializer also works [directly without Copilot](development.md#what-gets-templated).
 
 For every path, leave `knowledge_lakehouse_id = null` and `knowledge_ontologies = {}` through identity and platform setup, and keep the example's top-level `app_image_tag = null` and `reprint_image_tag = null` lines: the app and reprint phases write their image tags there. A tfvars file written before the reprint request needs `reprint_image_tag = null` added; the reprint phase stops with that instruction until it has exactly one such line. Start with a normal Azure CLI user sign-in in the chosen tenant. This lets Terraform prepare Entra configuration; the Fabric-scoped sign-in comes **after** registration and consent in step 3. Work from `infra/` for the remaining Terraform commands:
 
@@ -526,7 +526,7 @@ Use the native DEV/TEST deployment pipeline and explicitly attach the plan when 
 
 ## 7. Create the agents and app
 
-The template ships two [Foundry prompt agents](../agents/README.md), the variants
+This repository ships two [Foundry prompt agents](../agents/README.md), the variants
 of one agent, and the [web app](../app/README.md) that asks them from Azure
 Container Apps. Start after step 6 succeeds; the `reprint` phase first deploys the
 [reprint request server](#reprint-request) that the with-IQ agent's one action
@@ -603,8 +603,8 @@ your work account:
 
 This proves the route for your account only. Other users need an operator to grant
 them a Foundry role and Fabric access and, to approve reprint requests, an approval
-role from the [access model](runtime-integration.md#access-model); the template
-assigns none. Second-user isolation stays unverified until a second account proves it.
+role from the [access model](runtime-integration.md#access-model); a deployment
+assigns them none. Second-user isolation stays unverified until a second account proves it.
 
 ### Tracing
 
