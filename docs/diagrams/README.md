@@ -11,7 +11,7 @@ beside each image.
 
 ### Platform architecture
 
-[![Platform overview showing authoring, Fabric, Azure resources with Web IQ, and the two Foundry prompt agents with their Container Apps web app, with separate document, public-context, live-fact and optional Work IQ mail routes.](platform-architecture.svg)](platform-architecture.svg)
+[![Book Intelligence platform overview: authoring, Fabric with the Books lakehouse and BooksOntology, Azure resources with Web IQ, and the two Foundry prompt agents with the Container Apps web app and reprint request server, with separate document, public-context, live-fact and optional Work IQ mail routes.](platform-architecture.svg)](platform-architecture.svg)
 
 ### Deployment flow
 
