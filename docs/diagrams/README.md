@@ -27,6 +27,6 @@ beside each image.
 
 ### Fabric lifecycle
 
-[![Git bootstrap and native DEV/TEST promotion, with four ordered Bootstrap groups, target-local data and a separately owned PROD release.](fabric-lifecycle.svg)](fabric-lifecycle.svg)
+[![Git bootstrap and native DEV/TEST promotion, with the eight Bootstrap groups and their dependencies, target-local data and a separately owned PROD release.](fabric-lifecycle.svg)](fabric-lifecycle.svg)
 
 [Authoring guide](../diagram-authoring.md) | [Icon licenses](LICENSE)
