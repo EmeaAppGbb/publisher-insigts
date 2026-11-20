@@ -2,7 +2,7 @@
 
 The intended **derived-project DEV baseline after bootstrap, knowledge wiring and the reprint request, agents and app stage**, not a report of deployed resources. Copilot helps author and deploy all of it; further scenario workflows are the derived project's work.
 
-[![Platform overview showing authoring, Fabric, Azure resources with Web IQ, and the two Foundry prompt agents with their Container Apps web app, with separate document, public-context, live-fact and optional Work IQ mail routes.](diagrams/platform-architecture.svg)](diagrams/platform-architecture.svg)
+[![Book Intelligence platform overview: authoring, Fabric with the Books lakehouse and BooksOntology, Azure resources with Web IQ, and the two Foundry prompt agents with the Container Apps web app and reprint request server, with separate document, public-context, live-fact and optional Work IQ mail routes.](diagrams/platform-architecture.svg)](diagrams/platform-architecture.svg)
 
 Select the image for the full-size SVG. The [deployment flow](deployment-flow.md) shows how these components become ready. The overview doesn't show the reprint request server, its `BookEvents` Eventhouse or its route; the tables below do.
 
