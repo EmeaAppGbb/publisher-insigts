@@ -1,66 +1,51 @@
 # Contributing
 
-<!-- Template-owned: a derived repository should replace this file with its own contribution guide. -->
-
-This guide covers contributions to the **template itself**, through pull requests from forks.
-To build a project from it, select **Use this template** and follow
-[getting started](docs/getting-started.md) in your new repository. Don't fork it for a project:
-forks of this public repository are public and inherit the template setting, so the deployment
-runner refuses to deploy from them.
-
-This project welcomes contributions and suggestions. Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](CODE_OF_CONDUCT.md).
-Report security issues as described in [SECURITY.md](SECURITY.md), never in a public issue.
+Book Intelligence is an internal proof of concept: Microsoft IQ for a fictional book publisher, built on
+the [Fabric + Foundry IQ template](https://github.com/microsoftgbb/iq-template). Changes come through
+pull requests into `main`. Follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues
+as described in [SECURITY.md](SECURITY.md), never in an issue.
 
 ## Before you start
 
-- Open an issue before a large change, so the approach can be agreed first.
 - Read [AGENTS.md](AGENTS.md). Its guardrails apply to people and Copilot alike. The
-  [repository skills](.github/skills/) encode each workflow; extend them instead of
-  adding parallel scripts or wrappers.
-- Open a Codespace on your fork, or use the dev container, for the pinned toolchain; see
+  [repository skills](.github/skills/) encode each workflow; extend them instead of adding parallel
+  scripts or wrappers.
+- Open an issue before a large change, so the approach can be agreed first.
+- Open a Codespace on this repository, or use the dev container, for the pinned toolchain; see
   [developer setup](docs/development.md#codespaces-or-a-local-dev-container).
 
 ## Ground rules
 
-- **No sensitive data.** Never commit or paste credentials, tokens, tfvars, `.env` files,
-  Terraform state, saved plans, logs or tenant, subscription or physical Fabric IDs.
-- **Static checks only.** Never run a live `plan`, `apply`, `destroy`, deployment or notebook
-  as a test of a template change. Live work belongs in a derived repository with an explicitly
-  chosen target.
+- **Fictional scenario.** The publisher, its titles, authors, imprints, figures, documents and mail
+  are invented. Never write a real customer, company or person name into the repository, including
+  the client this proof of concept is for.
+- **No sensitive data.** Never commit or paste credentials, tokens, tfvars, `.env` files, Terraform
+  state, saved plans, logs, rendered agent definitions, app settings, deployment receipts or tenant,
+  subscription or physical Fabric IDs.
+- **Static checks are the test.** Never run a live `plan`, `apply`, `destroy`, deployment or notebook
+  as a check of a change. Live work runs against an environment of your own that you choose
+  explicitly ([test a change live](#test-a-change-live)).
+- **One governed action.** The reprint request is the agents' only tool that changes anything. Don't
+  add another write tool, widen its arguments or roles, or approve a request on a user's behalf.
 - **Portable identities.** Keep `.platform` logical IDs, TMDL lineage tags and binding markers
   stable; they are not deployment IDs.
 - **Locked dependencies.** Keep each `package-lock.json` (`app/` and the reprint request server in
   `scenario/workflows/reprint-request/`) in step with its `package.json`, on public npm registry URLs
   ([npm lockfile](#npm-lockfile)); never hand-edit its hashes.
-- **Fictional sample.** Keep sample sites, assets, documents and mail fictional; never add a
-  real customer, company or person name.
 - **Pins.** Do not upgrade providers, tools or dependencies in an unrelated change.
-- **Docs in step.** Keep the README, [getting started](docs/getting-started.md) and
-  `infra/terraform.tfvars.example` aligned with any input or behavior change.
+- **Docs in step.** Keep the [README](README.md), [getting started](docs/getting-started.md) and
+  `infra/terraform.tfvars.example` aligned with any input or behavior change. When the data, a rule
+  or an approved document changes, update the [storyline](scenario/data/README.md#storyline), the
+  tests and the [evals](scenario/evals/README.md) together.
 
-## Contribute through a fork
+## Make a change
 
-1. Fork [microsoftgbb/iq-template](https://github.com/microsoftgbb/iq-template) and clone your
-   fork, or open a Codespace on it. Keep your fork's `main` current with **Sync fork** on GitHub
-   or `gh repo sync <your-account>/iq-template`, then pull it.
-2. Create a branch from `main` and keep the change focused.
-3. Run the checks below, then push the branch to your fork.
-4. Open a pull request against `main` in `microsoftgbb/iq-template`, fill in the template and
-   leave **Allow edits by maintainers** on.
-5. CI starts once a maintainer approves workflows for first-time contributors. Fix any failures.
-   A static check doesn't prove cloud permissions, preview availability, quota or ingestion, so
-   say what you couldn't verify.
-6. A maintainer reviews changes to agent guidance, skills, CI, the dev
-   container, infrastructure, Fabric items, the agent definitions and dependencies. Maintainers
-   squash-merge approved pull requests.
+1. Create a branch from `main` and keep the change focused.
+2. Run the checks below, then push the branch.
+3. Open a pull request into `main` and fill in its template. CI runs on every pull request, with a
+   read-only token and no secrets or cloud access. Fix any failures.
+4. Say what the checks couldn't prove: cloud permissions, preview availability, quota or ingestion.
+5. A maintainer reviews the pull request and squash-merges it once it's approved.
 
 ## Run the checks
 
@@ -98,7 +83,7 @@ and its refusal of an MCP request without a token and of a missing configuration
 If `infra/` holds local deployment files, validate an isolated copy as described in the
 [template-maintenance skill](.github/skills/template-maintenance/SKILL.md#run-static-checks-only),
 which also lists the checks for notebooks, the initializer and the dev container. In Copilot,
-ask it to statically validate the template.
+ask it to statically validate the change.
 
 ### npm lockfile
 
@@ -114,33 +99,25 @@ node -e 'const fs=require("fs"),f="package-lock.json";fs.writeFileSync(f,fs.read
 
 ## Test a change live
 
-Static checks can't prove deployment behavior. To try a change end to end, deploy it from a
-separate repository with your own subscription and tenant:
+Static checks can't prove deployment behavior. To try a change end to end, push your branch and
+deploy it to a DEV environment of your own, from a fresh checkout of the branch, following
+[getting started](docs/getting-started.md): a distinct `project_name`, your own state, and your branch
+as the published branch (`--github-branch` on the first `deploy.py up`). Rerun `up` after each commit;
+it changes only what changed and asks you to approve each plan. Run the
+[evals](scenario/evals/README.md) after a change to the agents, the documents or the data, and approve
+a reprint request only when you mean to act: DEV can't take it back.
 
-1. Create a repository with **Use this template**; it can be private.
-2. Apply your branch's changes to it, for example:
+Share only redacted evidence in your pull request. Never commit deployment output, such as tfvars,
+state, deployment receipts or evidence, rendered agent definitions, app settings or bound workspace
+definitions.
 
-   ```sh
-   # In your fork, with main synced:
-   git diff --binary main...my-change > ../my-change.patch
-   # In a clone of the new repository:
-   git apply ../my-change.patch
-   ```
+## Review pull requests
 
-3. Commit, push and deploy it by following [getting started](docs/getting-started.md).
+For reviewers:
 
-Share only redacted evidence in your pull request. Never bring deployment output back into the
-template, such as tfvars, state, deployment receipts or evidence, rendered agent definitions,
-app settings or bound workspace definitions.
-
-## Review pull requests from forks
-
-For maintainers:
-
-- Approve workflow runs only after reading the diff. CI runs a fork's code with a read-only
-  token and no secrets; keep it that way, and never add `pull_request_target`.
-- Don't run a fork's code, build its dev container or open it in Codespaces or Copilot where your
-  cloud, GitHub or Codespaces credentials are available. Rely on CI or an isolated environment
-  without credentials.
+- Read the whole diff before approving. CI runs with a read-only token and no secrets; keep it that
+  way, and never add `pull_request_target`.
 - Treat changes to `AGENTS.md`, `.github/`, `.devcontainer/` and dependency manifests as code that
   runs with deployers' credentials or steers their agents.
+- Check the ground rules above: no real names, no sensitive data or deployment IDs, and docs in step
+  with the change.
